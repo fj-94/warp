@@ -1,29 +1,32 @@
-use std::{
-    collections::{HashMap, hash_map::DefaultHasher},
-    hash::{Hash, Hasher},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{ai::agent::redaction, terminal::model::session::SessionType};
-use futures_util::{StreamExt, stream};
+use futures_util::{stream, StreamExt};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use warp_core::features::FeatureFlag;
 use warp_multi_agent_api as api;
 
 use crate::server::server_api::{AIApiError, ServerApi};
 
-use super::{ConvertToAPITypeError, Event, RequestParams, ResponseStream, convert_to::convert_input};
+use super::{
+    convert_to::convert_input, ConvertToAPITypeError, Event, RequestParams, ResponseStream,
+};
 
 pub async fn generate_multi_agent_output(
     server_api: Arc<ServerApi>,
     mut params: RequestParams,
     cancellation_rx: futures::channel::oneshot::Receiver<()>,
 ) -> Result<ResponseStream, ConvertToAPITypeError> {
+    if params.should_redact_secrets {
+        redaction::redact_inputs(&mut params.input);
+    }
+
     if let Some(local_endpoint) = local_custom_endpoint_for_model(&params) {
-        return Ok(generate_local_custom_endpoint_output(params, local_endpoint, cancellation_rx)
-            .await);
+        return Ok(
+            generate_local_custom_endpoint_output(params, local_endpoint, cancellation_rx).await,
+        );
     }
 
     let supported_tools = params
@@ -57,10 +60,6 @@ pub async fn generate_multi_agent_output(
                 )),
             },
         );
-    }
-
-    if params.should_redact_secrets {
-        redaction::redact_inputs(&mut params.input);
     }
 
     let api_keys = api_keys_with_warp_credit_fallback_setting(
@@ -295,20 +294,10 @@ struct LocalConversationState {
     pending_tool_calls: HashMap<String, OpenAIToolCall>,
     active_command_id: Option<String>,
     current_user_goal: Option<String>,
-    last_request_appended_tool_result: bool,
-    only_allow_read_shell_command_output: bool,
-    force_summary_reason: Option<String>,
-    last_tool_request_signature: Option<String>,
-    repeated_tool_request_count: usize,
-    last_tool_result_signature: Option<String>,
-    repeated_tool_result_count: usize,
 }
 
 static LOCAL_CONVERSATIONS: Lazy<Mutex<HashMap<String, LocalConversationState>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-
-const LOCAL_REPEATED_TOOL_RESULT_LIMIT: usize = 1;
-const LOCAL_REPEATED_TOOL_REQUEST_LIMIT: usize = 1;
 
 #[derive(Debug)]
 enum LocalModelOutput {
@@ -329,10 +318,9 @@ async fn call_openai_compatible_chat_completion(
 ) -> Result<LocalModelOutput, AIApiError> {
     let url = chat_completions_url(&endpoint.base_url);
     let messages = local_openai_messages(params);
-    let should_disable_tools = local_should_disable_tools_for_request(params);
-    let only_allow_read_shell_command_output = local_followup_tool_constraints(params);
+    let tools = local_openai_tools(params);
     log::info!(
-        "Local custom request: input_task_id={:?}, task_ids={:?}, active_command_id={:?}, disable_tools={}, read_output_followup_tools={}, message_count={}",
+        "Local custom request: input_task_id={:?}, task_ids={:?}, active_command_id={:?}, tool_count={}, message_count={}",
         params.input_task_id.as_ref().map(ToString::to_string),
         params
             .tasks
@@ -340,8 +328,7 @@ async fn call_openai_compatible_chat_completion(
             .map(|task| task.id.clone())
             .collect::<Vec<_>>(),
         local_active_command_id(params),
-        should_disable_tools,
-        only_allow_read_shell_command_output,
+        tools.len(),
         messages.len()
     );
     let response = reqwest::Client::new()
@@ -350,13 +337,7 @@ async fn call_openai_compatible_chat_completion(
         .json(&ChatCompletionRequest {
             model: endpoint.model.clone(),
             messages,
-            tools: if should_disable_tools {
-                vec![]
-            } else if only_allow_read_shell_command_output {
-                vec![read_shell_command_output_tool_schema()]
-            } else {
-                local_openai_tools()
-            },
+            tools,
             stream: false,
         })
         .send()
@@ -384,23 +365,16 @@ async fn call_openai_compatible_chat_completion(
         .next()
         .ok_or_else(|| AIApiError::Other(anyhow::anyhow!("Custom endpoint returned no choices")))?;
 
-    // If this request intentionally disabled tools (tool-result followup), never attempt to parse
-    // tool calls (structured or DSML). Some providers intermittently leak DSML tool markup into
-    // `content` even when tools are not provided; treating those as executable tool calls causes
-    // infinite permission loops in the UI.
-    if !should_disable_tools {
-        if let Some(tool_calls) = message.tool_calls.filter(|calls| !calls.is_empty()) {
-            return Ok(LocalModelOutput::ToolCalls {
-                content: local_tool_call_content(message.content),
-                reasoning_content: message.reasoning_content,
-                tool_calls,
-            });
-        }
+    if let Some(tool_calls) = message.tool_calls.filter(|calls| !calls.is_empty()) {
+        return Ok(LocalModelOutput::ToolCalls {
+            content: sanitize_local_visible_content(message.content),
+            reasoning_content: message.reasoning_content,
+            tool_calls,
+        });
     }
 
     if let Some(content) = message.content.as_deref() {
-        if !should_disable_tools {
-            if let Some(tool_calls) = parse_dsml_tool_calls(content) {
+        if let Some(tool_calls) = parse_dsml_tool_calls(content) {
             log::info!(
                 "Local custom parsed {} DSML text tool call(s) from model content",
                 tool_calls.len()
@@ -410,13 +384,10 @@ async fn call_openai_compatible_chat_completion(
                 reasoning_content: message.reasoning_content,
                 tool_calls,
             });
-            }
         }
     }
 
-    message
-        .content
-        .filter(|content| !content.trim().is_empty())
+    sanitize_local_visible_content(message.content)
         .map(|content| LocalModelOutput::Text {
             content,
             reasoning_content: message.reasoning_content,
@@ -444,10 +415,7 @@ fn parse_dsml_tool_calls(content: &str) -> Option<Vec<OpenAIToolCall>> {
     for segment in content.split("invoke name=").skip(1) {
         let name = parse_dsml_quoted_value(segment)?;
         let invoke_end_tag = "</｜DSML｜invoke>";
-        let invoke_body = segment
-            .splitn(2, invoke_end_tag)
-            .next()
-            .unwrap_or(segment);
+        let invoke_body = segment.splitn(2, invoke_end_tag).next().unwrap_or(segment);
         let args = parse_dsml_parameters(invoke_body);
         tool_calls.push(OpenAIToolCall {
             id: format!("local_dsml_{}", uuid::Uuid::new_v4()),
@@ -528,13 +496,20 @@ fn local_prompt_from_inputs(params: &RequestParams, active_command_id: Option<&s
                 parts.push(format!("USER QUESTION:\n{query}"));
             }
             crate::ai::agent::AIAgentInput::SummarizeConversation { prompt, .. } => {
-                parts.push(prompt.clone().unwrap_or_else(|| "Summarize this conversation.".to_string()));
+                parts.push(
+                    prompt
+                        .clone()
+                        .unwrap_or_else(|| "Summarize this conversation.".to_string()),
+                );
             }
             crate::ai::agent::AIAgentInput::CreateNewProject { query, .. } => {
                 parts.push(query.clone());
             }
             crate::ai::agent::AIAgentInput::CloneRepository { clone_repo_url, .. } => {
-                parts.push(format!("Clone or discuss this repository: {}", clone_repo_url.clone().into_url()));
+                parts.push(format!(
+                    "Clone or discuss this repository: {}",
+                    clone_repo_url.clone().into_url()
+                ));
             }
             other => {
                 parts.push(format!("{other:?}"));
@@ -568,9 +543,8 @@ fn local_openai_messages(params: &RequestParams) -> Vec<ChatCompletionMessage> {
         conversation.active_command_id = Some(command_id);
     }
     let active_command_id = conversation.active_command_id.clone();
-    // Only treat this request as a "tool-result followup" when it contains action results
-    // but does not contain a new user query. This prevents multi-turn chats from accidentally
-    // disabling tools just because Warp included prior action results as context.
+    // Only add the tool-result continuation instruction when the request contains action results
+    // but does not contain a new user query. User turns should be modeled as new user messages.
     let has_user_query = params
         .input
         .iter()
@@ -588,16 +562,9 @@ fn local_openai_messages(params: &RequestParams) -> Vec<ChatCompletionMessage> {
 
     if has_user_query {
         conversation.current_user_goal = local_user_query_text(params);
-        conversation.force_summary_reason = None;
-        conversation.last_tool_request_signature = None;
-        conversation.repeated_tool_request_count = 0;
-        conversation.last_tool_result_signature = None;
-        conversation.repeated_tool_result_count = 0;
     }
 
     let mut appended_action_result = false;
-    let mut appended_terminal_snapshot = false;
-    let mut appended_successful_request_command = false;
     for input in &params.input {
         if let crate::ai::agent::AIAgentInput::ActionResult { result, .. } = input {
             let tool_call_id = result.id.to_string();
@@ -605,7 +572,6 @@ fn local_openai_messages(params: &RequestParams) -> Vec<ChatCompletionMessage> {
                 "{}",
                 crate::ai::agent::MarkdownActionResult(&result.result)
             ));
-            let tool_result_signature = local_tool_result_signature(&result.result, &tool_result);
             conversation.messages.push(ChatCompletionMessage {
                 role: "tool".to_string(),
                 content: Some(tool_result),
@@ -615,50 +581,16 @@ fn local_openai_messages(params: &RequestParams) -> Vec<ChatCompletionMessage> {
             });
             conversation.pending_tool_calls.remove(&tool_call_id);
             appended_action_result = true;
-            appended_terminal_snapshot |= is_local_terminal_snapshot_result(&result.result);
-            appended_successful_request_command |= is_local_successful_request_command_result(&result.result);
-
-            if !has_user_query {
-                conversation.last_tool_request_signature = None;
-                conversation.repeated_tool_request_count = 0;
-                if conversation
-                    .last_tool_result_signature
-                    .as_deref()
-                    == Some(tool_result_signature.as_str())
-                {
-                    conversation.repeated_tool_result_count += 1;
-                } else {
-                    conversation.last_tool_result_signature = Some(tool_result_signature);
-                    conversation.repeated_tool_result_count = 0;
-                }
-
-                if conversation.repeated_tool_result_count >= LOCAL_REPEATED_TOOL_RESULT_LIMIT {
-                    conversation.force_summary_reason = Some(
-                        "The latest tool result repeated previous output. Stop requesting more tools and explain the current state to the user."
-                            .to_string(),
-                    );
-                }
-            }
         }
     }
-    let force_summary_reason = conversation.force_summary_reason.clone();
-    conversation.last_request_appended_tool_result =
-        appended_action_result
-            && !appended_terminal_snapshot
-            && !has_user_query
-            && (!appended_successful_request_command || force_summary_reason.is_some());
-    conversation.only_allow_read_shell_command_output =
-        appended_action_result
-            && appended_terminal_snapshot
-            && !has_user_query
-            && force_summary_reason.is_none();
 
-    conversation
-        .messages
-        .retain(|message| !is_local_summary_instruction(message) && !is_dsml_assistant_text(message));
+    conversation.messages.retain(|message| {
+        !is_local_summary_instruction(message) && !is_dsml_assistant_text(message)
+    });
 
     if !conversation.pending_tool_calls.is_empty() {
-        let pending_tool_call_ids: Vec<_> = conversation.pending_tool_calls.keys().cloned().collect();
+        let pending_tool_call_ids: Vec<_> =
+            conversation.pending_tool_calls.keys().cloned().collect();
         for tool_call_id in pending_tool_call_ids {
             conversation.messages.push(ChatCompletionMessage {
                 role: "tool".to_string(),
@@ -693,13 +625,7 @@ fn local_openai_messages(params: &RequestParams) -> Vec<ChatCompletionMessage> {
     }
 
     let mut sanitized_messages = sanitize_openai_tool_messages(conversation.messages.clone());
-    if let Some(reason) = force_summary_reason {
-        sanitized_messages.push(local_summary_instruction_message(Some(&reason)));
-    } else if conversation.last_request_appended_tool_result {
-        sanitized_messages.push(local_summary_instruction_message(None));
-    } else if conversation.only_allow_read_shell_command_output {
-        sanitized_messages.push(local_read_shell_command_output_instruction_message());
-    } else if appended_successful_request_command && !has_user_query {
+    if appended_action_result && !has_user_query {
         sanitized_messages.push(local_continue_after_tool_result_instruction_message(
             conversation.current_user_goal.as_deref(),
         ));
@@ -744,7 +670,6 @@ fn local_response_events(params: &RequestParams, output: LocalModelOutput) -> Ve
                     continue;
                 }
 
-                let repeated_request = remember_local_tool_request(params, &tool_call);
                 match warp_tool_message_from_openai_tool_call(
                     &tool_call,
                     &envelope.task_id,
@@ -752,12 +677,6 @@ fn local_response_events(params: &RequestParams, output: LocalModelOutput) -> Ve
                     default_command_id.as_deref(),
                     false,
                 ) {
-                    Ok(_message) if repeated_request => {
-                        invalid_tool_messages.push(format!(
-                            "Repeated local tool call `{}` was stopped to avoid a no-progress loop.",
-                            tool_call.function.name
-                        ));
-                    }
                     Ok(message) => valid_tool_calls.push((tool_call, message)),
                     Err(error) => invalid_tool_messages.push(format!(
                         "Unsupported local tool call `{}`: {error}",
@@ -766,7 +685,10 @@ fn local_response_events(params: &RequestParams, output: LocalModelOutput) -> Ve
                 }
             }
 
-            if let Some(content) = content.as_ref().filter(|content| !content.trim().is_empty()) {
+            if let Some(content) = content
+                .as_ref()
+                .filter(|content| !content.trim().is_empty())
+            {
                 envelope.push_agent_output(content.clone());
             }
 
@@ -809,29 +731,6 @@ fn local_response_events(params: &RequestParams, output: LocalModelOutput) -> Ve
     events
 }
 
-fn remember_local_tool_request(params: &RequestParams, tool_call: &OpenAIToolCall) -> bool {
-    let signature = local_tool_request_signature(tool_call);
-    let key = local_conversation_key(params);
-    let mut state = LOCAL_CONVERSATIONS.lock();
-    let conversation = state.entry(key).or_default();
-    if conversation.last_tool_request_signature.as_deref() == Some(signature.as_str()) {
-        conversation.repeated_tool_request_count += 1;
-    } else {
-        conversation.last_tool_request_signature = Some(signature);
-        conversation.repeated_tool_request_count = 0;
-    }
-
-    if conversation.repeated_tool_request_count >= LOCAL_REPEATED_TOOL_REQUEST_LIMIT {
-        conversation.force_summary_reason = Some(
-            "The model requested the same tool call again. Stop requesting more tools and explain the current state to the user."
-                .to_string(),
-        );
-        true
-    } else {
-        false
-    }
-}
-
 fn local_output_for_non_executed_tool_call(tool_call: &OpenAIToolCall) -> Option<String> {
     if tool_call.function.name != "transfer_shell_command_control_to_user" {
         return None;
@@ -845,7 +744,9 @@ fn local_output_for_non_executed_tool_call(tool_call: &OpenAIToolCall) -> Option
     Some(reason)
 }
 
-fn sanitize_openai_tool_messages(messages: Vec<ChatCompletionMessage>) -> Vec<ChatCompletionMessage> {
+fn sanitize_openai_tool_messages(
+    messages: Vec<ChatCompletionMessage>,
+) -> Vec<ChatCompletionMessage> {
     let mut sanitized = Vec::with_capacity(messages.len());
     let mut pending_tool_call_ids: Vec<String> = vec![];
 
@@ -855,7 +756,10 @@ fn sanitize_openai_tool_messages(messages: Vec<ChatCompletionMessage>) -> Vec<Ch
                 continue;
             }
         } else if message.role != "tool" {
-            append_interrupted_tool_results(&mut sanitized, std::mem::take(&mut pending_tool_call_ids));
+            append_interrupted_tool_results(
+                &mut sanitized,
+                std::mem::take(&mut pending_tool_call_ids),
+            );
         }
 
         if message.role == "tool" {
@@ -879,7 +783,12 @@ fn sanitize_openai_tool_messages(messages: Vec<ChatCompletionMessage>) -> Vec<Ch
                 .filter(|tool_calls| !tool_calls.is_empty());
             pending_tool_call_ids = tool_calls
                 .as_ref()
-                .map(|tool_calls| tool_calls.iter().map(|tool_call| tool_call.id.clone()).collect())
+                .map(|tool_calls| {
+                    tool_calls
+                        .iter()
+                        .map(|tool_call| tool_call.id.clone())
+                        .collect()
+                })
                 .unwrap_or_default();
             message.tool_calls = tool_calls;
         }
@@ -911,40 +820,9 @@ fn append_interrupted_tool_results(
     }
 }
 
-fn local_summary_instruction_message(reason: Option<&str>) -> ChatCompletionMessage {
-    let content = reason
-        .map(|reason| {
-            format!(
-                "You have received the tool result. Do not call any more tools for this turn. {reason} Provide a concise final answer to the user based on the tool output."
-            )
-        })
-        .unwrap_or_else(|| {
-            "You have received the tool result. Do not call any more tools for this turn. Provide a concise final answer to the user based on the tool output."
-                .to_string()
-        });
-    ChatCompletionMessage {
-        role: "system".to_string(),
-        content: Some(content),
-        reasoning_content: None,
-        tool_call_id: None,
-        tool_calls: None,
-    }
-}
-
-fn local_read_shell_command_output_instruction_message() -> ChatCompletionMessage {
-    ChatCompletionMessage {
-        role: "system".to_string(),
-        content: Some(
-            "You received a terminal snapshot after writing to the running command. If output is incomplete, call read_shell_command_output once to wait for updated output. Do not call write_to_long_running_shell_command again for this turn. If the snapshot already answers the user, provide a concise final answer."
-                .to_string(),
-        ),
-        reasoning_content: None,
-        tool_call_id: None,
-        tool_calls: None,
-    }
-}
-
-fn local_continue_after_tool_result_instruction_message(goal: Option<&str>) -> ChatCompletionMessage {
+fn local_continue_after_tool_result_instruction_message(
+    goal: Option<&str>,
+) -> ChatCompletionMessage {
     let goal_suffix = goal
         .filter(|goal| !goal.trim().is_empty())
         .map(|goal| format!(" Current user goal: {goal}"))
@@ -953,7 +831,7 @@ fn local_continue_after_tool_result_instruction_message(goal: Option<&str>) -> C
         role: "system".to_string(),
         content: Some(
             format!(
-                "You received a successful tool result.{goal_suffix} Continue using tools only if another step is necessary to complete the user's goal. If the result is enough, provide a concise final answer. Do not repeat a tool call that produced no new information."
+                "You received a tool result.{goal_suffix} Continue using tools until you have enough evidence to complete the user's goal. If the result is enough, provide the final answer now. Do not repeat a tool call that produced no new information."
             ),
         ),
         reasoning_content: None,
@@ -964,14 +842,13 @@ fn local_continue_after_tool_result_instruction_message(goal: Option<&str>) -> C
 
 fn is_local_summary_instruction(message: &ChatCompletionMessage) -> bool {
     message.role == "system"
-        && message
-            .content
-            .as_deref()
-            .is_some_and(|content| {
-                content.starts_with("You have received the tool result.")
-                    || content.starts_with("You received a terminal snapshot after writing")
-                    || content.starts_with("You received a successful read-only shell command result.")
-            })
+        && message.content.as_deref().is_some_and(|content| {
+            content.starts_with("You have received the tool result.")
+                || content.starts_with("You received a terminal snapshot after writing")
+                || content.starts_with("You received a successful read-only shell command result.")
+                || content.starts_with("You received a successful tool result.")
+                || content.starts_with("You received a tool result.")
+        })
 }
 
 fn is_dsml_assistant_text(message: &ChatCompletionMessage) -> bool {
@@ -983,11 +860,33 @@ fn is_dsml_assistant_text(message: &ChatCompletionMessage) -> bool {
             .is_some_and(|content| content.contains("tool_calls") && content.contains("DSML"))
 }
 
-fn local_tool_call_content(content: Option<String>) -> Option<String> {
-    content.filter(|content| {
-        let trimmed = content.trim();
-        !(trimmed.contains("tool_calls") && trimmed.contains("DSML"))
-    })
+fn sanitize_local_visible_content(content: Option<String>) -> Option<String> {
+    let content = content?;
+    if !looks_like_dsml_tool_text(&content) {
+        return (!content.trim().is_empty()).then_some(content);
+    }
+
+    let visible = content
+        .lines()
+        .filter(|line| !looks_like_dsml_tool_line(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+    (!visible.is_empty()).then_some(visible)
+}
+
+fn looks_like_dsml_tool_text(content: &str) -> bool {
+    content.contains("DSML") && (content.contains("tool_calls") || content.contains("invoke name="))
+}
+
+fn looks_like_dsml_tool_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.contains("DSML")
+        || trimmed.starts_with("<|")
+        || trimmed.starts_with("</|")
+        || trimmed.contains("invoke name=")
+        || trimmed.contains("parameter name=")
 }
 
 struct LocalEventEnvelope {
@@ -1027,15 +926,15 @@ impl LocalEventEnvelope {
             params.input_task_id.as_ref().map(ToString::to_string)
         );
 
-        let mut events = vec![
-            Ok(api::ResponseEvent {
-                r#type: Some(api::response_event::Type::Init(api::response_event::StreamInit {
+        let mut events = vec![Ok(api::ResponseEvent {
+            r#type: Some(api::response_event::Type::Init(
+                api::response_event::StreamInit {
                     conversation_id,
                     request_id: request_id.clone(),
                     run_id: String::new(),
-                })),
-            }),
-        ];
+                },
+            )),
+        })];
         if should_create_root_task {
             events.push(Ok(api::ResponseEvent {
                 r#type: Some(api::response_event::Type::ClientActions(
@@ -1200,134 +1099,7 @@ fn local_active_command_id(params: &RequestParams) -> Option<String> {
     })
 }
 
-fn local_should_disable_tools_for_request(params: &RequestParams) -> bool {
-    if local_force_summary_for_request(params) {
-        return true;
-    }
-
-    let has_user_query = params
-        .input
-        .iter()
-        .any(|input| matches!(input, crate::ai::agent::AIAgentInput::UserQuery { .. }));
-    let has_action_result = params
-        .input
-        .iter()
-        .any(|input| matches!(input, crate::ai::agent::AIAgentInput::ActionResult { .. }));
-    has_action_result
-        && !has_user_query
-        && !params.input.iter().any(|input| {
-            matches!(
-                input,
-                crate::ai::agent::AIAgentInput::ActionResult { result, .. }
-                    if is_local_terminal_snapshot_result(&result.result)
-                        || is_local_successful_request_command_result(&result.result)
-            )
-        })
-}
-
-#[cfg(test)]
-fn local_should_only_allow_read_shell_command_output(params: &RequestParams) -> bool {
-    let has_user_query = params
-        .input
-        .iter()
-        .any(|input| matches!(input, crate::ai::agent::AIAgentInput::UserQuery { .. }));
-    !has_user_query
-        && params.input.iter().any(|input| {
-            matches!(
-                input,
-                crate::ai::agent::AIAgentInput::ActionResult { result, .. }
-                    if is_local_terminal_snapshot_result(&result.result)
-            )
-        })
-}
-
-fn local_followup_tool_constraints(params: &RequestParams) -> bool {
-    let key = local_conversation_key(params);
-    LOCAL_CONVERSATIONS
-        .lock()
-        .get(&key)
-        .map(|conversation| conversation.only_allow_read_shell_command_output)
-        .unwrap_or_default()
-}
-
-#[cfg(test)]
-fn local_has_force_summary(params: &RequestParams) -> bool {
-    local_force_summary_for_request(params)
-}
-
-fn local_force_summary_for_request(params: &RequestParams) -> bool {
-    let key = local_conversation_key(params);
-    LOCAL_CONVERSATIONS
-        .lock()
-        .get(&key)
-        .is_some_and(|conversation| conversation.force_summary_reason.is_some())
-}
-
-fn is_local_terminal_snapshot_result(result: &crate::ai::agent::AIAgentActionResultType) -> bool {
-    matches!(
-        result,
-        crate::ai::agent::AIAgentActionResultType::WriteToLongRunningShellCommand(
-            crate::ai::agent::WriteToLongRunningShellCommandResult::Snapshot { .. }
-        ) | crate::ai::agent::AIAgentActionResultType::ReadShellCommandOutput(
-            crate::ai::agent::ReadShellCommandOutputResult::LongRunningCommandSnapshot { .. }
-        )
-    )
-}
-
-fn is_local_successful_request_command_result(
-    result: &crate::ai::agent::AIAgentActionResultType,
-) -> bool {
-    matches!(
-        result,
-        crate::ai::agent::AIAgentActionResultType::RequestCommandOutput(result)
-            if result.is_successful()
-    )
-}
-
-fn local_tool_result_signature(
-    result: &crate::ai::agent::AIAgentActionResultType,
-    rendered_result: &str,
-) -> String {
-    let mut hasher = DefaultHasher::new();
-    std::mem::discriminant(result).hash(&mut hasher);
-    normalize_tool_text(rendered_result).hash(&mut hasher);
-    format!("{:x}", hasher.finish())
-}
-
-fn local_tool_request_signature(tool_call: &OpenAIToolCall) -> String {
-    let normalized_args = serde_json::from_str::<Value>(&tool_call.function.arguments)
-        .map(normalize_json_value)
-        .unwrap_or_else(|_| Value::String(tool_call.function.arguments.clone()));
-    format!("{}:{}", tool_call.function.name, normalized_args)
-}
-
-fn normalize_json_value(value: Value) -> Value {
-    match value {
-        Value::Array(items) => Value::Array(items.into_iter().map(normalize_json_value).collect()),
-        Value::Object(items) => {
-            let mut sorted = serde_json::Map::new();
-            for (key, value) in items {
-                sorted.insert(key, normalize_json_value(value));
-            }
-            Value::Object(sorted)
-        }
-        other => other,
-    }
-}
-
-fn normalize_tool_text(text: &str) -> String {
-    text.lines()
-        .map(str::trim_end)
-        .filter(|line| !line.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn remember_assistant_text(
-    params: &RequestParams,
-    text: &str,
-    reasoning_content: Option<&str>,
-) {
+fn remember_assistant_text(params: &RequestParams, text: &str, reasoning_content: Option<&str>) {
     let key = local_conversation_key(params);
     let mut state = LOCAL_CONVERSATIONS.lock();
     let conversation = state.entry(key).or_default();
@@ -1363,97 +1135,40 @@ fn remember_assistant_tool_calls(
     }
 }
 
-fn local_openai_tools() -> Vec<OpenAITool> {
-    vec![
-        run_shell_command_tool_schema(),
-        tool_schema(
-            "write_to_long_running_shell_command",
-            "Write input to the active long-running shell command.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "command_id": {"type": "string"},
-                    "input": {"type": "string"},
-                    "mode": {"type": "string", "enum": ["raw", "line", "block"]}
-                },
-                "required": ["input"]
-            }),
-        ),
-        read_shell_command_output_tool_schema(),
-        tool_schema(
-            "transfer_shell_command_control_to_user",
-            "Transfer control of the active long-running command back to the user.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "reason": {"type": "string"}
-                },
-                "required": ["reason"]
-            }),
-        ),
-        tool_schema(
-            "read_files",
-            "Read one or more files.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "files": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {"type": "string"},
-                                "start": {"type": "integer"},
-                                "end": {"type": "integer"}
-                            },
-                            "required": ["name"]
-                        }
-                    }
-                },
-                "required": ["files"]
-            }),
-        ),
-        tool_schema(
-            "grep",
-            "Search text or regex patterns in files.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "queries": {"type": "array", "items": {"type": "string"}},
-                    "path": {"type": "string"}
-                },
-                "required": ["queries"]
-            }),
-        ),
-        tool_schema(
-            "file_glob_v2",
-            "Find files by name patterns.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "patterns": {"type": "array", "items": {"type": "string"}},
-                    "search_dir": {"type": "string"},
-                    "max_matches": {"type": "integer"},
-                    "max_depth": {"type": "integer"},
-                    "min_depth": {"type": "integer"}
-                },
-                "required": ["patterns"]
-            }),
-        ),
-        tool_schema(
-            "search_codebase",
-            "Search the indexed codebase semantically.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "path_filters": {"type": "array", "items": {"type": "string"}},
-                    "codebase_path": {"type": "string"}
-                },
-                "required": ["query"]
-            }),
-        ),
-    ]
+fn local_openai_tools(params: &RequestParams) -> Vec<OpenAITool> {
+    let supported_tools = params
+        .supported_tools_override
+        .clone()
+        .unwrap_or_else(|| get_supported_tools(params));
+    let supported_cli_agent_tools = get_supported_cli_agent_tools(params);
+    let mut tools = vec![];
+
+    if supported_tools.contains(&api::ToolType::RunShellCommand) {
+        tools.push(run_shell_command_tool_schema());
+    }
+    if supported_tools.contains(&api::ToolType::WriteToLongRunningShellCommand) {
+        tools.push(write_to_long_running_shell_command_tool_schema());
+    }
+    if supported_tools.contains(&api::ToolType::ReadShellCommandOutput) {
+        tools.push(read_shell_command_output_tool_schema());
+    }
+    if supported_cli_agent_tools.contains(&api::ToolType::TransferShellCommandControlToUser) {
+        tools.push(transfer_shell_command_control_to_user_tool_schema());
+    }
+    if supported_tools.contains(&api::ToolType::ReadFiles) {
+        tools.push(read_files_tool_schema());
+    }
+    if supported_tools.contains(&api::ToolType::Grep) {
+        tools.push(grep_tool_schema());
+    }
+    if supported_tools.contains(&api::ToolType::FileGlobV2) {
+        tools.push(file_glob_v2_tool_schema());
+    }
+    if supported_tools.contains(&api::ToolType::SearchCodebase) {
+        tools.push(search_codebase_tool_schema());
+    }
+
+    tools
 }
 
 fn run_shell_command_tool_schema() -> OpenAITool {
@@ -1484,6 +1199,110 @@ fn read_shell_command_output_tool_schema() -> OpenAITool {
                 "command_id": {"type": "string"},
                 "delay_seconds": {"type": "integer", "minimum": 0}
             }
+        }),
+    )
+}
+
+fn write_to_long_running_shell_command_tool_schema() -> OpenAITool {
+    tool_schema(
+        "write_to_long_running_shell_command",
+        "Write input to the active long-running shell command.",
+        json!({
+            "type": "object",
+            "properties": {
+                "command_id": {"type": "string"},
+                "input": {"type": "string"},
+                "mode": {"type": "string", "enum": ["raw", "line", "block"]}
+            },
+            "required": ["input"]
+        }),
+    )
+}
+
+fn transfer_shell_command_control_to_user_tool_schema() -> OpenAITool {
+    tool_schema(
+        "transfer_shell_command_control_to_user",
+        "Transfer control of the active long-running command back to the user.",
+        json!({
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string"}
+            },
+            "required": ["reason"]
+        }),
+    )
+}
+
+fn read_files_tool_schema() -> OpenAITool {
+    tool_schema(
+        "read_files",
+        "Read one or more files.",
+        json!({
+            "type": "object",
+            "properties": {
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "start": {"type": "integer"},
+                            "end": {"type": "integer"}
+                        },
+                        "required": ["name"]
+                    }
+                }
+            },
+            "required": ["files"]
+        }),
+    )
+}
+
+fn grep_tool_schema() -> OpenAITool {
+    tool_schema(
+        "grep",
+        "Search text or regex patterns in files.",
+        json!({
+            "type": "object",
+            "properties": {
+                "queries": {"type": "array", "items": {"type": "string"}},
+                "path": {"type": "string"}
+            },
+            "required": ["queries"]
+        }),
+    )
+}
+
+fn file_glob_v2_tool_schema() -> OpenAITool {
+    tool_schema(
+        "file_glob_v2",
+        "Find files by name patterns.",
+        json!({
+            "type": "object",
+            "properties": {
+                "patterns": {"type": "array", "items": {"type": "string"}},
+                "search_dir": {"type": "string"},
+                "max_matches": {"type": "integer"},
+                "max_depth": {"type": "integer"},
+                "min_depth": {"type": "integer"}
+            },
+            "required": ["patterns"]
+        }),
+    )
+}
+
+fn search_codebase_tool_schema() -> OpenAITool {
+    tool_schema(
+        "search_codebase",
+        "Search the indexed codebase semantically.",
+        json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "path_filters": {"type": "array", "items": {"type": "string"}},
+                "codebase_path": {"type": "string"}
+            },
+            "required": ["query"]
         }),
     )
 }
@@ -1585,10 +1404,7 @@ fn warp_tool_message_from_openai_tool_call(
                 command_id: command_id_arg_or_default(&args, default_command_id),
                 delay: int_arg(&args, "delay_seconds").map(|seconds| {
                     api::message::tool_call::read_shell_command_output::Delay::Duration(
-                        prost_types::Duration {
-                            seconds,
-                            nanos: 0,
-                        },
+                        prost_types::Duration { seconds, nanos: 0 },
                     )
                 }),
             },
@@ -1596,12 +1412,14 @@ fn warp_tool_message_from_openai_tool_call(
         "transfer_shell_command_control_to_user" => {
             return Err("transfer_shell_command_control_to_user is handled locally".to_string());
         }
-        "read_files" => api::message::tool_call::Tool::ReadFiles(api::message::tool_call::ReadFiles {
-            files: array_arg(&args, "files")
-                .into_iter()
-                .filter_map(read_file_arg)
-                .collect(),
-        }),
+        "read_files" => {
+            api::message::tool_call::Tool::ReadFiles(api::message::tool_call::ReadFiles {
+                files: array_arg(&args, "files")
+                    .into_iter()
+                    .filter_map(read_file_arg)
+                    .collect(),
+            })
+        }
         "grep" => api::message::tool_call::Tool::Grep(api::message::tool_call::Grep {
             queries: string_array_arg(&args, "queries"),
             path: string_arg_optional(&args, "path").unwrap_or_default(),
@@ -1652,9 +1470,7 @@ fn write_mode(
         Some("raw") => Mode::Raw(()),
         _ => Mode::Line(()),
     };
-    api::message::tool_call::write_to_long_running_shell_command::Mode {
-        mode: Some(mode),
-    }
+    api::message::tool_call::write_to_long_running_shell_command::Mode { mode: Some(mode) }
 }
 
 fn read_file_arg(value: &Value) -> Option<api::message::tool_call::read_files::File> {
