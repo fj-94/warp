@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
+use warp_core::user_preferences::GetUserPreferences;
 use warpui::{App, SingletonEntity};
 
+use super::{LocalAIExecutionProfilesSnapshot, LOCAL_AI_EXECUTION_PROFILES_KEY};
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::execution_profiles::{
     AIExecutionProfile, ActionPermission, CloudAIExecutionProfileModel,
@@ -94,41 +96,43 @@ fn edits_persist_on_unsynced_default_profile_when_logged_out() {
                  apply_code_diffs value after an edit made while logged out",
             );
         });
+
+        app.read(|ctx| {
+            let serialized = ctx
+                .private_user_preferences()
+                .read_value(LOCAL_AI_EXECUTION_PROFILES_KEY)
+                .expect("should read local profile preference")
+                .expect("local profile preference should be written");
+            let snapshot: LocalAIExecutionProfilesSnapshot =
+                serde_json::from_str(&serialized).expect("should deserialize local profiles");
+            assert_eq!(
+                snapshot
+                    .default_profile
+                    .expect("default profile should be saved")
+                    .apply_code_diffs,
+                ActionPermission::AlwaysAllow,
+                "default profile edit should persist in private preferences",
+            );
+        });
     })
 }
 
-/// Regression test for the "log in to an existing user after onboarding"
-/// bug. Cloud objects arriving via the initial bulk load are inserted into
-/// `CloudModel` *without* firing per-object `ObjectCreated` events —
-/// `update_objects_from_initial_load` passes `emit_events: false` and emits
-/// a single `CloudModelEvent::InitialLoadCompleted` afterward instead.
-/// Without the reconciliation handler for `InitialLoadCompleted`, the
-/// existing user's default profile sits in `CloudModel` but
-/// `AIExecutionProfilesModel` stays in `Unsynced`, so a subsequent
-/// onboarding edit creates a duplicate cloud default profile instead of
-/// editing the existing one. This test drives that sequence and asserts
-/// the model adopts the cloud profile's sync id.
+/// Local Agent mode intentionally does not let cloud profile objects rewrite
+/// the active/default profile. A workspace metadata refresh can otherwise
+/// reintroduce server-selected models and clear custom model ids.
 #[test]
-fn reconciles_unsynced_default_profile_with_cloud_after_initial_load() {
+fn local_mode_ignores_cloud_default_profile_after_initial_load() {
     App::test((), |mut app| async move {
         install_singletons(&mut app, AuthStateProvider::new_for_test());
         let profile_model = app.add_singleton_model(|ctx| {
             AIExecutionProfilesModel::new(&LaunchMode::new_for_unit_test(), ctx)
         });
 
-        // Baseline: CloudModel is empty, so the model starts Unsynced and
-        // `sync_id` is `None`.
-        profile_model.read(&app, |model, ctx| {
-            assert!(
-                model.default_profile(ctx).sync_id().is_none(),
-                "default profile should be Unsynced at startup"
-            );
+        let default_profile_id = profile_model.read(&app, |model, _ctx| model.default_profile_id());
+        profile_model.update(&mut app, |model, ctx| {
+            model.set_apply_code_diffs(default_profile_id, &ActionPermission::AlwaysAsk, ctx);
         });
 
-        // Simulate the user's existing cloud default profile arriving via
-        // initial bulk load. We construct the existing profile with
-        // `apply_code_diffs = AlwaysAllow` so we can verify the model is
-        // reading that cloud object after reconciliation.
         let cloud_uid = ServerId::from(42);
         let cloud_sync_id = SyncId::ServerId(cloud_uid);
         let cloud_profile = AIExecutionProfile {
@@ -144,50 +148,23 @@ fn reconciles_unsynced_default_profile_with_cloud_after_initial_load() {
             permissions: ServerPermissions::mock_personal(),
         };
 
-        // Insert the object into CloudModel via the initial-load path
-        // (`emit_events=false`) and then emit `InitialLoadCompleted` so the
-        // reconciliation handler fires.
         CloudModel::handle(&app).update(&mut app, move |cloud_model, ctx| {
             let server_objects: Vec<ServerAIExecutionProfile> = vec![server_object];
             cloud_model.update_objects_from_initial_load(server_objects, false, false, ctx);
             ctx.emit(CloudModelEvent::InitialLoadCompleted);
         });
 
-        // The model should now be Synced with the cloud profile's sync_id,
-        // and `default_profile` should read values from the existing cloud
-        // object (proving we're not backed by a fresh client-side default).
         profile_model.read(&app, |model, ctx| {
             let info = model.default_profile(ctx);
             assert_eq!(
                 info.sync_id(),
-                Some(cloud_sync_id),
-                "model did not adopt the existing cloud default profile's sync_id"
-            );
-            assert_eq!(
-                info.data().apply_code_diffs,
-                ActionPermission::AlwaysAllow,
-                "default profile should now surface the existing cloud value"
-            );
-        });
-
-        // Further edits should now target the existing cloud profile in
-        // place, rather than falling through the `Unsynced` branch and
-        // creating a duplicate.
-        let default_profile_id = profile_model.read(&app, |model, _ctx| model.default_profile_id());
-        profile_model.update(&mut app, |model, ctx| {
-            model.set_apply_code_diffs(default_profile_id, &ActionPermission::AlwaysAsk, ctx);
-        });
-        profile_model.read(&app, |model, ctx| {
-            let info = model.default_profile(ctx);
-            assert_eq!(
-                info.sync_id(),
-                Some(cloud_sync_id),
-                "edit should target the same cloud sync_id, not create a duplicate"
+                None,
+                "local profile should not adopt a cloud sync_id"
             );
             assert_eq!(
                 info.data().apply_code_diffs,
                 ActionPermission::AlwaysAsk,
-                "edit should be reflected on the existing cloud profile"
+                "local profile should not be overwritten by cloud profile data"
             );
         });
     })

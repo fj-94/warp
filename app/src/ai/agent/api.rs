@@ -6,8 +6,8 @@ mod r#impl;
 pub use ai::agent::convert::ConvertToAPITypeError;
 use ai::api_keys::ApiKeyManager;
 pub use convert_from::{
-    ConversionParams, ConvertAPIMessageToClientOutputMessage, MaybeAIAgentOutputMessage,
-    MessageToAIAgentOutputMessageError, user_inputs_from_messages,
+    user_inputs_from_messages, ConversionParams, ConvertAPIMessageToClientOutputMessage,
+    MaybeAIAgentOutputMessage, MessageToAIAgentOutputMessageError,
 };
 
 pub use r#impl::generate_multi_agent_output;
@@ -31,11 +31,11 @@ use crate::{
 use super::{AIAgentInput, MCPContext, MCPServer, RequestMetadata, Suggestions};
 use crate::ai::blocklist::{BlocklistAIPermissions, RequestInput};
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
-use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::ai::mcp::templatable_manager::TemplatableMCPServerInfo;
+use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::settings::AISettings;
 use crate::terminal::safe_mode_settings::get_secret_obfuscation_mode;
-use crate::workspaces::user_workspaces::UserWorkspaces;
+use crate::{ai::local_agent_only_enabled, workspaces::user_workspaces::UserWorkspaces};
 use warp_core::user_preferences::GetUserPreferences;
 use warpui::{AppContext, EntityId, SingletonEntity as _};
 
@@ -245,10 +245,12 @@ impl RequestParams {
             is_byo_enabled,
             user_workspaces.is_aws_bedrock_credentials_enabled(app),
         );
-        let is_custom_inference_enabled = user_workspaces.is_custom_inference_enabled(app);
+        let is_custom_inference_enabled =
+            local_agent_only_enabled() || user_workspaces.is_custom_inference_enabled(app);
         let custom_model_providers =
             api_key_manager.custom_model_providers_for_request(is_custom_inference_enabled);
-        let allow_use_of_warp_credits = *AISettings::as_ref(app).can_use_warp_credits_for_fallback;
+        let allow_use_of_warp_credits = !local_agent_only_enabled()
+            && *AISettings::as_ref(app).can_use_warp_credits_for_fallback;
 
         let app_execution_mode = AppExecutionMode::as_ref(app);
         let autonomy_level = if app_execution_mode.is_autonomous() {

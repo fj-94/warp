@@ -1,5 +1,5 @@
 use parking_lot::FairMutex;
-use serde::{Deserialize, Serialize, de};
+use serde::{de, Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, OnceLock},
@@ -9,9 +9,10 @@ use warp_core::user_preferences::GetUserPreferences;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity};
 
 use crate::{
+    ai::local_agent_only_enabled,
     auth::{
-        AuthStateProvider,
         auth_manager::{AuthManager, AuthManagerEvent},
+        AuthStateProvider,
     },
     network::{NetworkStatus, NetworkStatusEvent, NetworkStatusKind},
     report_error,
@@ -567,31 +568,33 @@ impl LLMPreferences {
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
         let models_by_feature = get_cached_models(ctx).unwrap_or_default();
 
-        ctx.subscribe_to_model(&NetworkStatus::handle(ctx), |me, event, ctx| {
-            if let NetworkStatusEvent::NetworkStatusChanged {
-                new_status: NetworkStatusKind::Online,
-            } = event
-            {
-                me.refresh_authed_models(ctx);
-            }
-        });
+        if !local_agent_only_enabled() {
+            ctx.subscribe_to_model(&NetworkStatus::handle(ctx), |me, event, ctx| {
+                if let NetworkStatusEvent::NetworkStatusChanged {
+                    new_status: NetworkStatusKind::Online,
+                } = event
+                {
+                    me.refresh_authed_models(ctx);
+                }
+            });
 
-        // TODO: Instead of querying this ad-hoc upon a successful log in, we should add the
-        // available LLMs query to the general workspace metadata query which is polled
-        // and hooked up to workspace changes. For that to work, each user would need to
-        // have a personal workspace. This is a stop-gap.
-        ctx.subscribe_to_model(&AuthManager::handle(ctx), |me, event, ctx| {
-            if let AuthManagerEvent::AuthComplete = event {
-                me.refresh_authed_models(ctx);
-            }
-        });
+            // TODO: Instead of querying this ad-hoc upon a successful log in, we should add the
+            // available LLMs query to the general workspace metadata query which is polled
+            // and hooked up to workspace changes. For that to work, each user would need to
+            // have a personal workspace. This is a stop-gap.
+            ctx.subscribe_to_model(&AuthManager::handle(ctx), |me, event, ctx| {
+                if let AuthManagerEvent::AuthComplete = event {
+                    me.refresh_authed_models(ctx);
+                }
+            });
 
-        ctx.subscribe_to_model(&UserWorkspaces::handle(ctx), |me, event, ctx| {
-            if let UserWorkspacesEvent::TeamsChanged = event {
-                me.sanitize_disabled_custom_model_preferences(ctx);
-                me.refresh_authed_models(ctx);
-            }
-        });
+            ctx.subscribe_to_model(&UserWorkspaces::handle(ctx), |me, event, ctx| {
+                if let UserWorkspacesEvent::TeamsChanged = event {
+                    me.sanitize_disabled_custom_model_preferences(ctx);
+                    me.refresh_authed_models(ctx);
+                }
+            });
+        }
 
         // Re-reconcile disabled model preferences when BYOK keys change, since
         // RequiresUpgrade models may become usable or unusable.
@@ -601,7 +604,9 @@ impl LLMPreferences {
             &ApiKeyManager::handle(ctx),
             |me, _event: &ApiKeyManagerEvent, ctx| {
                 me.rebuild_custom_llms(ctx);
-                me.reconcile_disabled_model_preferences(ctx);
+                if !local_agent_only_enabled() {
+                    me.reconcile_disabled_model_preferences(ctx);
+                }
                 ctx.emit(LLMPreferencesEvent::UpdatedAvailableLLMs);
             },
         );
@@ -667,7 +672,9 @@ impl LLMPreferences {
                     .info_for_id(&id)
                     .or_else(|| self.custom_llm_info_for_id_if_enabled(&id, app))
             })
-            .unwrap_or_else(|| self.models_by_feature.agent_mode.default_llm_info())
+            .unwrap_or_else(|| {
+                self.default_llm_info_for_local_mode(&self.models_by_feature.agent_mode)
+            })
     }
 
     pub fn get_active_coding_model<'a>(
@@ -696,7 +703,7 @@ impl LLMPreferences {
                     .info_for_id(&id)
                     .or_else(|| self.custom_llm_info_for_id_if_enabled(&id, app))
             })
-            .unwrap_or_else(|| self.models_by_feature.coding.default_llm_info())
+            .unwrap_or_else(|| self.default_llm_info_for_local_mode(&self.models_by_feature.coding))
     }
 
     /// Returns the set of LLMs available for Agent Mode use.
@@ -709,7 +716,10 @@ impl LLMPreferences {
             .agent_mode
             .choices
             .iter()
-            .filter(|llm| !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled)))
+            .filter(|llm| {
+                !local_agent_only_enabled()
+                    && !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled))
+            })
             .chain(self.custom_llm_choices(app))
     }
 
@@ -720,7 +730,10 @@ impl LLMPreferences {
             .coding
             .choices
             .iter()
-            .filter(|llm| !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled)))
+            .filter(|llm| {
+                !local_agent_only_enabled()
+                    && !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled))
+            })
             .chain(self.custom_llm_choices(app))
     }
 
@@ -729,6 +742,7 @@ impl LLMPreferences {
         self.get_cli_agent_available()
             .choices
             .iter()
+            .filter(|_| !local_agent_only_enabled())
             .chain(self.custom_llm_choices(app))
     }
 
@@ -750,12 +764,12 @@ impl LLMPreferences {
                     .info_for_id(&id)
                     .or_else(|| self.custom_llm_info_for_id_if_enabled(&id, app))
             })
-            .unwrap_or_else(|| available.default_llm_info())
+            .unwrap_or_else(|| self.default_llm_info_for_local_mode(available))
     }
 
     /// Returns the default CLI agent model as a fallback.
     pub fn get_default_cli_agent_model(&self) -> &LLMInfo {
-        self.get_cli_agent_available().default_llm_info()
+        self.default_llm_info_for_local_mode(self.get_cli_agent_available())
     }
 
     /// Helper to get the AvailableLLMs for cli_agent, falling back to agent_mode.
@@ -767,8 +781,12 @@ impl LLMPreferences {
     }
 
     /// Returns the set of LLMs available for computer use agent.
-    pub fn get_computer_use_llm_choices(&self) -> impl Iterator<Item = &LLMInfo> {
-        self.get_computer_use_available().choices.iter()
+    pub fn get_computer_use_llm_choices(&self, app: &AppContext) -> impl Iterator<Item = &LLMInfo> {
+        self.get_computer_use_available()
+            .choices
+            .iter()
+            .filter(|_| !local_agent_only_enabled())
+            .chain(self.custom_llm_choices(app))
     }
 
     /// Returns the `LLMInfo` for the computer use agent model.
@@ -784,13 +802,17 @@ impl LLMPreferences {
             .data()
             .computer_use_model
             .clone()
-            .and_then(|id| available.info_for_id(&id))
-            .unwrap_or_else(|| available.default_llm_info())
+            .and_then(|id| {
+                available
+                    .info_for_id(&id)
+                    .or_else(|| self.custom_llm_info_for_id_if_enabled(&id, app))
+            })
+            .unwrap_or_else(|| self.default_llm_info_for_local_mode(available))
     }
 
     /// Returns the default computer use model as a fallback.
     pub fn get_default_computer_use_model(&self) -> &LLMInfo {
-        self.get_computer_use_available().default_llm_info()
+        self.default_llm_info_for_local_mode(self.get_computer_use_available())
     }
 
     /// Helper to get the AvailableLLMs for computer_use.
@@ -836,7 +858,17 @@ impl LLMPreferences {
     }
 
     fn custom_inference_enabled(app: &AppContext) -> bool {
-        UserWorkspaces::as_ref(app).is_custom_inference_enabled(app)
+        local_agent_only_enabled() || UserWorkspaces::as_ref(app).is_custom_inference_enabled(app)
+    }
+
+    fn default_llm_info_for_local_mode<'a>(&'a self, fallback: &'a AvailableLLMs) -> &'a LLMInfo {
+        if local_agent_only_enabled() {
+            if let Some(custom_llm) = self.custom_llms.first() {
+                return custom_llm;
+            }
+        }
+
+        fallback.default_llm_info()
     }
 
     /// Reads the user's current `ApiKeyManager.custom_endpoints` and replaces `custom_llms`
@@ -923,16 +955,20 @@ impl LLMPreferences {
 
     /// Returns the default base model as a fallback.
     pub fn get_default_base_model(&self) -> &LLMInfo {
-        self.models_by_feature.agent_mode.default_llm_info()
+        self.default_llm_info_for_local_mode(&self.models_by_feature.agent_mode)
     }
 
     /// Returns the default coding model as a fallback.
     pub fn get_default_coding_model(&self) -> &LLMInfo {
-        self.models_by_feature.coding.default_llm_info()
+        self.default_llm_info_for_local_mode(&self.models_by_feature.coding)
     }
 
     /// Returns the preferred Codex model, if set by the server.
     pub fn get_preferred_codex_model(&self) -> Option<&LLMInfo> {
+        if local_agent_only_enabled() {
+            return self.custom_llms.first();
+        }
+
         self.models_by_feature
             .agent_mode
             .preferred_codex_model_id
@@ -959,8 +995,15 @@ impl LLMPreferences {
             .data()
             .base_model
             .as_ref()
-            .and_then(|id| self.models_by_feature.agent_mode.info_for_id(id))
-            .unwrap_or_else(|| self.models_by_feature.agent_mode.default_llm_info())
+            .and_then(|id| {
+                self.models_by_feature
+                    .agent_mode
+                    .info_for_id(id)
+                    .or_else(|| self.custom_llm_info_for_id_if_enabled(id, ctx))
+            })
+            .unwrap_or_else(|| {
+                self.default_llm_info_for_local_mode(&self.models_by_feature.agent_mode)
+            })
             .id
             .clone();
 
@@ -1062,6 +1105,10 @@ impl LLMPreferences {
 
     /// Fetches the latest set of models from the server for the currently logged in user, and updates the model.
     pub fn refresh_authed_models(&self, ctx: &mut ModelContext<Self>) {
+        if local_agent_only_enabled() {
+            return;
+        }
+
         // Don't try to fetch auth'd models if the user is not logged in yet.
         if !AuthStateProvider::as_ref(ctx).get().is_logged_in() {
             return;
@@ -1085,6 +1132,10 @@ impl LLMPreferences {
 
     /// No auth required (i.e. to populate the pre-login onboarding picker).
     fn refresh_public_models(&self, ctx: &mut ModelContext<Self>) {
+        if local_agent_only_enabled() {
+            return;
+        }
+
         let ai_api_client = ServerApiProvider::as_ref(ctx).get_ai_client();
         ctx.spawn(
             async move { ai_api_client.get_free_available_models(None).await },
@@ -1102,6 +1153,10 @@ impl LLMPreferences {
     }
 
     pub fn refresh_available_models(&self, ctx: &mut ModelContext<Self>) {
+        if local_agent_only_enabled() {
+            return;
+        }
+
         if AuthStateProvider::as_ref(ctx).get().is_logged_in() {
             self.refresh_authed_models(ctx);
         } else {
@@ -1114,6 +1169,10 @@ impl LLMPreferences {
         choices_result: Result<ModelsByFeature, anyhow::Error>,
         ctx: &mut ModelContext<Self>,
     ) {
+        if local_agent_only_enabled() {
+            return;
+        }
+
         if let Ok(choices) = choices_result {
             self.on_server_update(choices, ctx);
         }
@@ -1166,6 +1225,10 @@ impl LLMPreferences {
     /// Called both when the model list is refreshed from the server and when
     /// BYOK API keys change (since `RequiresUpgrade` usability is BYOK-aware).
     fn reconcile_disabled_model_preferences(&self, ctx: &mut ModelContext<Self>) {
+        if local_agent_only_enabled() {
+            return;
+        }
+
         let profiles_model = AIExecutionProfilesModel::handle(ctx);
         profiles_model.update(ctx, |profiles, ctx| {
             for profile_id in profiles.get_all_profile_ids() {

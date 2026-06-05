@@ -1,6 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{ai::agent::redaction, terminal::model::session::SessionType};
+use crate::{
+    ai::agent::redaction, ai::local_agent_only_enabled, terminal::model::session::SessionType,
+};
 use futures_util::{stream, StreamExt};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -27,6 +29,13 @@ pub async fn generate_multi_agent_output(
         return Ok(
             generate_local_custom_endpoint_output(params, local_endpoint, cancellation_rx).await,
         );
+    }
+
+    if local_agent_only_enabled() {
+        let events = vec![Err(Arc::new(AIApiError::Other(anyhow::anyhow!(
+            "Local Agent mode requires a configured custom model for the selected profile."
+        ))))];
+        return Ok(Box::pin(stream::iter(events).take_until(cancellation_rx)));
     }
 
     let supported_tools = params

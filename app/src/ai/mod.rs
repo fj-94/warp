@@ -57,6 +57,10 @@ pub mod outline;
 
 pub(crate) use ai::paths;
 
+pub(crate) fn local_agent_only_enabled() -> bool {
+    true
+}
+
 pub fn init(app: &mut AppContext) {
     blocklist::keyboard_navigable_buttons::init(app);
     blocklist::block::number_shortcut_buttons::init(app);

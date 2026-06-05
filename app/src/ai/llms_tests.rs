@@ -1,4 +1,6 @@
 use super::*;
+use crate::test_util::settings::initialize_settings_for_tests;
+use warpui::App;
 
 // -- DisableReason::should_clear_preference tests --
 
@@ -302,4 +304,56 @@ fn removing_endpoint_purges_all_its_models_from_custom_llms() {
     let infos = build_custom_llm_infos(&after);
     assert_eq!(infos.len(), 1);
     assert_eq!(infos[0].id.as_str(), "uuid-k1");
+}
+
+#[test]
+fn local_agent_mode_choices_only_include_custom_models() {
+    App::test((), |mut app| async move {
+        initialize_settings_for_tests(&mut app);
+
+        ApiKeyManager::handle(&app).update(&mut app, |manager, ctx| {
+            manager.add_custom_endpoint(
+                "Local OpenAI".to_string(),
+                "http://localhost:11434/v1".to_string(),
+                "local-key".to_string(),
+                vec![(
+                    "qwen2.5-coder".to_string(),
+                    Some("Qwen Local".to_string()),
+                    Some("local-qwen".to_string()),
+                )],
+                ctx,
+            );
+        });
+
+        let prefs = app.add_singleton_model(LLMPreferences::new);
+
+        prefs.read(&app, |prefs, ctx| {
+            let base_choices: Vec<_> = prefs
+                .get_base_llm_choices_for_agent_mode(ctx)
+                .map(|info| info.id.as_str().to_string())
+                .collect();
+            let coding_choices: Vec<_> = prefs
+                .get_coding_llm_choices(ctx)
+                .map(|info| info.id.as_str().to_string())
+                .collect();
+            let computer_use_choices: Vec<_> = prefs
+                .get_computer_use_llm_choices(ctx)
+                .map(|info| info.id.as_str().to_string())
+                .collect();
+
+            assert_eq!(base_choices, vec!["local-qwen"]);
+            assert_eq!(coding_choices, vec!["local-qwen"]);
+            assert_eq!(computer_use_choices, vec!["local-qwen"]);
+            assert_eq!(prefs.get_default_base_model().id.as_str(), "local-qwen");
+            assert_eq!(prefs.get_default_coding_model().id.as_str(), "local-qwen");
+            assert_eq!(
+                prefs
+                    .get_preferred_codex_model()
+                    .expect("custom model should be used for Codex in local mode")
+                    .id
+                    .as_str(),
+                "local-qwen"
+            );
+        });
+    });
 }

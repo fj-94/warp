@@ -127,7 +127,7 @@ impl AISubpage {
         }
     }
 }
-use crate::ai::{AIRequestUsageModel, AIRequestUsageModelEvent};
+use crate::ai::{local_agent_only_enabled, AIRequestUsageModel, AIRequestUsageModelEvent};
 use crate::menu::{MenuItem, MenuItemFields};
 use crate::server::telemetry::{
     AgentModeAutoDetectionSettingOrigin, AutonomySettingToggleSource,
@@ -1378,8 +1378,9 @@ impl AISettingsPageView {
         });
 
         // Custom inference
-        let custom_inference_controls_enabled =
-            is_any_ai_enabled && UserWorkspaces::as_ref(ctx).is_custom_inference_enabled(ctx);
+        let custom_inference_controls_enabled = is_any_ai_enabled
+            && (local_agent_only_enabled()
+                || UserWorkspaces::as_ref(ctx).is_custom_inference_enabled(ctx));
         let custom_inference_add_button = ctx.add_typed_action_view(|_| {
             ActionButton::new("+ Add custom model", SecondaryTheme)
                 .with_size(ButtonSize::Small)
@@ -1620,7 +1621,8 @@ impl AISettingsPageView {
     }
     fn can_use_custom_inference_controls(app: &AppContext) -> bool {
         AISettings::as_ref(app).is_any_ai_enabled(app)
-            && UserWorkspaces::as_ref(app).is_custom_inference_enabled(app)
+            && (local_agent_only_enabled()
+                || UserWorkspaces::as_ref(app).is_custom_inference_enabled(app))
     }
 
     fn show_add_custom_endpoint_modal(&mut self, ctx: &mut ViewContext<Self>) {
@@ -7268,8 +7270,8 @@ impl SettingsWidget for ApiKeysWidget {
         let ai_settings = AISettings::as_ref(app);
         let is_any_ai_enabled = ai_settings.is_any_ai_enabled(app);
         let is_byo_enabled = UserWorkspaces::as_ref(app).is_byo_api_key_enabled(app);
-        let is_custom_inference_enabled =
-            UserWorkspaces::as_ref(app).is_custom_inference_enabled(app);
+        let is_custom_inference_enabled = local_agent_only_enabled()
+            || UserWorkspaces::as_ref(app).is_custom_inference_enabled(app);
         let provider_keys_enabled = is_any_ai_enabled && is_byo_enabled;
         let custom_inference_controls_enabled = is_any_ai_enabled && is_custom_inference_enabled;
         let show_custom_inference = is_custom_inference_enabled;
