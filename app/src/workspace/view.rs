@@ -21498,7 +21498,7 @@ impl TypedActionView for Workspace {
                 ctx.open_url(&upgrade_url);
             }
             ShowReferralSettingsPage => {
-                self.show_settings_with_section(Some(SettingsSection::Referrals), ctx);
+                self.show_settings_with_section(Some(SettingsSection::Appearance), ctx);
             }
             JoinSlack => self.join_slack(ctx),
             ViewUserDocs => self.view_user_docs(ctx),
