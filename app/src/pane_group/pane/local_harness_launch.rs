@@ -1,5 +1,10 @@
 use std::{collections::HashMap, ffi::OsString, path::PathBuf, sync::Arc};
 
+#[cfg(test)]
+use crate::ai::ambient_agents::{
+    task::{normalize_orchestrator_agent_name, HarnessConfig},
+    AgentConfigSnapshot,
+};
 use crate::ai::local_child_harnesses::local_child_harness_disabled_message;
 use crate::ai::{
     agent_sdk::{
@@ -12,10 +17,7 @@ use crate::ai::{
         },
         task_env_vars, validate_cli_installed,
     },
-    ambient_agents::{
-        task::{normalize_orchestrator_agent_name, HarnessConfig, HarnessModelConfig},
-        AgentConfigSnapshot, AmbientAgentTaskId,
-    },
+    ambient_agents::{task::HarnessModelConfig, AmbientAgentTaskId},
 };
 use crate::server::server_api::ai::AIClient;
 use crate::terminal::cli_agent_sessions::plugin_manager::plugin_manager_for;
@@ -69,6 +71,7 @@ pub(super) fn build_local_codex_child_command(prompt: &str) -> String {
     format!("codex --dangerously-bypass-approvals-and-sandbox {quoted_prompt}")
 }
 
+#[cfg(test)]
 pub(super) fn local_child_task_config(
     harness: Harness,
     agent_name: Option<String>,
@@ -94,10 +97,10 @@ pub(super) async fn prepare_local_harness_child_launch(
     harness_type: String,
     model_id: Option<String>,
     parent_run_id: Option<String>,
-    agent_name: Option<String>,
+    _agent_name: Option<String>,
     shell_type: Option<ShellType>,
     startup_directory: Option<PathBuf>,
-    ai_client: Arc<dyn AIClient>,
+    _ai_client: Arc<dyn AIClient>,
 ) -> Result<PreparedLocalHarnessLaunch, String> {
     let harness_model_config =
         model_id
@@ -181,20 +184,10 @@ pub(super) async fn prepare_local_harness_child_launch(
         Harness::Gemini => unreachable!("normalize_local_child_harness filters out Gemini"),
     };
 
-    let task_id = ai_client
-        .create_agent_task(
-            prompt.clone(),
-            None,
-            parent_run_id.clone(),
-            local_child_task_config(harness, agent_name),
-        )
-        .await
-        .map_err(|error| {
-            format!(
-                "Failed to create local {} child task: {error}",
-                harness.display_name()
-            )
-        })?;
+    let task_id: AmbientAgentTaskId = Uuid::new_v4()
+        .to_string()
+        .parse()
+        .map_err(|error| format!("Failed to create local child task id: {error}"))?;
 
     let mut env_vars = task_env_vars(Some(&task_id), parent_run_id.as_deref(), harness);
     // Propagate the selected model to Claude Code via ANTHROPIC_MODEL.

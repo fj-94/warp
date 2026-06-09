@@ -321,6 +321,8 @@ enum LocalModelOutput {
     },
 }
 
+const LOCAL_AGENT_SYSTEM_PROMPT: &str = "You are Warp Agent running locally with access to Warp tools. Use tools when you need terminal output, shell commands, files, search, or long-running command control. For remote-control or long-running terminal sessions, call read_shell_command_output to inspect the screen, write_to_long_running_shell_command to send input, and transfer_shell_command_control_to_user when the user should take control. Reply with final text only after tools are done.";
+
 async fn call_openai_compatible_chat_completion(
     params: &RequestParams,
     endpoint: &LocalCustomEndpoint,
@@ -479,6 +481,54 @@ fn dsml_value(value: &str) -> Value {
     }
 }
 
+fn local_system_message() -> ChatCompletionMessage {
+    ChatCompletionMessage {
+        role: "system".to_string(),
+        content: Some(LOCAL_AGENT_SYSTEM_PROMPT.to_string()),
+        reasoning_content: None,
+        tool_call_id: None,
+        tool_calls: None,
+    }
+}
+
+fn restored_local_openai_messages(params: &RequestParams) -> Vec<ChatCompletionMessage> {
+    let mut messages = vec![local_system_message()];
+    messages.extend(
+        params
+            .tasks
+            .iter()
+            .flat_map(|task| task.messages.iter())
+            .filter_map(restored_chat_message_from_api_message),
+    );
+    messages
+}
+
+fn restored_chat_message_from_api_message(message: &api::Message) -> Option<ChatCompletionMessage> {
+    match message.message.as_ref()? {
+        api::message::Message::UserQuery(query) => {
+            let query = query.query.trim();
+            (!query.is_empty()).then(|| ChatCompletionMessage {
+                role: "user".to_string(),
+                content: Some(format!("USER QUESTION:\n{query}")),
+                reasoning_content: None,
+                tool_call_id: None,
+                tool_calls: None,
+            })
+        }
+        api::message::Message::AgentOutput(output) => {
+            let text = output.text.trim();
+            (!text.is_empty()).then(|| ChatCompletionMessage {
+                role: "assistant".to_string(),
+                content: Some(text.to_string()),
+                reasoning_content: None,
+                tool_call_id: None,
+                tool_calls: None,
+            })
+        }
+        _ => None,
+    }
+}
+
 fn local_prompt_from_inputs(params: &RequestParams, active_command_id: Option<&str>) -> String {
     let mut parts = vec![];
     for input in &params.input {
@@ -560,13 +610,15 @@ fn local_openai_messages(params: &RequestParams) -> Vec<ChatCompletionMessage> {
         .any(|input| matches!(input, crate::ai::agent::AIAgentInput::UserQuery { .. }));
 
     if conversation.messages.is_empty() {
-        conversation.messages.push(ChatCompletionMessage {
-            role: "system".to_string(),
-            content: Some("You are Warp Agent running locally with access to Warp tools. Use tools when you need terminal output, shell commands, files, search, or long-running command control. For remote-control or long-running terminal sessions, call read_shell_command_output to inspect the screen, write_to_long_running_shell_command to send input, and transfer_shell_command_control_to_user when the user should take control. Reply with final text only after tools are done.".to_string()),
-            reasoning_content: None,
-            tool_call_id: None,
-            tool_calls: None,
-        });
+        conversation.messages = restored_local_openai_messages(params);
+        if conversation.current_user_goal.is_none() {
+            conversation.current_user_goal = conversation
+                .messages
+                .iter()
+                .rev()
+                .find(|message| message.role == "user")
+                .and_then(|message| message.content.clone());
+        }
     }
 
     if has_user_query {
@@ -1075,13 +1127,7 @@ fn target_task_for_local_response(params: &RequestParams) -> Option<api::Task> {
 }
 
 fn local_conversation_key(params: &RequestParams) -> String {
-    params
-        .conversation_token
-        .as_ref()
-        .map(|token| token.as_str().to_string())
-        .or_else(|| params.input_task_id.as_ref().map(ToString::to_string))
-        .or_else(|| params.tasks.first().map(|task| task.id.clone()))
-        .unwrap_or_else(|| "local-custom-default".to_string())
+    params.local_conversation_id.to_string()
 }
 
 fn observed_active_running_command_id(params: &RequestParams) -> Option<String> {

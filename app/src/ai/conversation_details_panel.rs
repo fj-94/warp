@@ -297,10 +297,6 @@ impl ConversationDetailsData {
             directory = first_exchange.working_directory.clone();
         }
 
-        let copy_link_url = conversation_id
-            .as_ref()
-            .map(|id| ServerConversationToken::new(id.clone()).conversation_link());
-
         let harness = conversation
             .server_metadata()
             .map(|m| Harness::from(m.harness))
@@ -324,7 +320,7 @@ impl ConversationDetailsData {
             artifacts: conversation.artifacts().to_vec(),
             open_action: None,
             source_prompt: conversation.initial_query(),
-            copy_link_url,
+            copy_link_url: None,
             skill_spec: None,
             harness,
             fetch_error: None,
@@ -334,7 +330,7 @@ impl ConversationDetailsData {
     pub fn from_task(
         task: &AmbientAgentTask,
         open_action: Option<WorkspaceAction>,
-        copy_link_url: Option<String>,
+        _copy_link_url: Option<String>,
         app: &AppContext,
     ) -> Self {
         let error_message = if task.state.is_failure_like() {
@@ -388,7 +384,7 @@ impl ConversationDetailsData {
                 .map(PrincipalInfo::from),
             executor: task.executor.as_ref().map(PrincipalInfo::from),
             source_prompt: Some(task.prompt.clone()),
-            copy_link_url,
+            copy_link_url: None,
             skill_spec,
             harness,
             fetch_error: None,
@@ -399,7 +395,7 @@ impl ConversationDetailsData {
         entry: &AgentConversationEntry,
         task: Option<&AmbientAgentTask>,
         open_action: Option<WorkspaceAction>,
-        copy_link_url: Option<String>,
+        _copy_link_url: Option<String>,
     ) -> Self {
         let creator = entry
             .display
@@ -460,7 +456,7 @@ impl ConversationDetailsData {
                 artifacts: entry.display.artifacts.clone(),
                 open_action,
                 source_prompt,
-                copy_link_url,
+                copy_link_url: None,
                 skill_spec,
                 harness,
                 fetch_error: None,
@@ -487,7 +483,7 @@ impl ConversationDetailsData {
             artifacts: entry.display.artifacts.clone(),
             open_action,
             source_prompt,
-            copy_link_url,
+            copy_link_url: None,
             skill_spec: None,
             harness,
             fetch_error: None,
@@ -538,7 +534,7 @@ impl ConversationDetailsData {
         open_action: Option<WorkspaceAction>,
         status: Option<ConversationStatus>,
         initial_query: Option<String>,
-        copy_link_url: Option<String>,
+        _copy_link_url: Option<String>,
         harness: Option<Harness>,
     ) -> Self {
         ConversationDetailsData {
@@ -557,7 +553,7 @@ impl ConversationDetailsData {
             open_action,
             artifacts,
             source_prompt: initial_query,
-            copy_link_url,
+            copy_link_url: None,
             skill_spec: None,
             harness,
             fetch_error: None,

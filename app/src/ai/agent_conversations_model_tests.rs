@@ -792,23 +792,7 @@ fn test_get_entries_includes_cloud_metadata_only_entry() {
         app.update(|ctx| {
             let entries = model.get_entries(&all_owner_filters(), ctx);
 
-            assert_eq!(entries.len(), 1);
-            let entry = &entries[0];
-            assert_eq!(
-                entry
-                    .identity
-                    .server_conversation_token
-                    .as_ref()
-                    .map(|t| t.as_str()),
-                Some(token)
-            );
-            assert_eq!(
-                entry.provenance,
-                AgentConversationProvenance::CloudSyncedConversation
-            );
-            assert!(entry.backing.has_cloud_data);
-            assert!(!entry.backing.has_loaded_conversation);
-            assert!(!entry.backing.has_local_persisted_data);
+            assert!(entries.is_empty());
         });
     });
 }
@@ -917,14 +901,9 @@ fn test_get_entries_merges_task_and_local_conversation_by_server_token() {
             let entry = &entries[0];
             assert_eq!(entry.id, AgentConversationEntryId::AmbientRun(task.task_id));
             assert_eq!(entry.identity.local_conversation_id, Some(conversation_id));
-            assert_eq!(
-                entry
-                    .identity
-                    .server_conversation_token
-                    .as_ref()
-                    .map(|t| t.as_str()),
-                Some(server_token)
-            );
+            assert_eq!(entry.identity.server_conversation_token, None);
+            assert!(!entry.backing.has_cloud_data);
+            assert!(!entry.capabilities.can_copy_link);
         });
     });
 }
@@ -1154,13 +1133,7 @@ fn test_resolve_open_action_handles_server_token_subject_without_entry() {
                 ctx,
             );
 
-            assert!(matches!(
-                action,
-                Some(WorkspaceAction::OpenConversationTranscriptViewer {
-                    conversation_id,
-                    ambient_agent_task_id: None,
-                }) if conversation_id == server_token
-            ));
+            assert!(action.is_none());
         });
     });
 }
@@ -1193,13 +1166,7 @@ fn test_resolve_open_action_opens_completed_cloud_task_by_server_token() {
                 ctx,
             );
 
-            assert!(matches!(
-                action,
-                Some(WorkspaceAction::OpenConversationTranscriptViewer {
-                    conversation_id,
-                    ambient_agent_task_id: Some(resolved_task_id),
-                }) if conversation_id.as_str() == token && resolved_task_id == task_id
-            ));
+            assert!(action.is_none());
         });
     });
 }
@@ -1221,34 +1188,16 @@ fn test_resolve_open_action_opens_metadata_only_cloud_conversation_by_server_tok
         app.update(|ctx| {
             let entries =
                 AgentConversationsModel::as_ref(ctx).get_entries(&all_owner_filters(), ctx);
-            let entry = entries
-                .iter()
-                .find(|entry| {
-                    entry
-                        .identity
-                        .server_conversation_token
-                        .as_ref()
-                        .is_some_and(|server_token| server_token.as_str() == token)
-                })
-                .expect("metadata-only cloud entry should exist");
-
-            assert!(entry.backing.has_cloud_data);
-            assert!(!entry.backing.has_loaded_conversation);
-            assert!(!entry.backing.has_local_persisted_data);
+            assert!(entries.is_empty());
 
             let action = AgentConversationsModel::resolve_open_action(
-                AgentConversationNavigationSubject::Entry(entry.id),
+                AgentConversationNavigationSubject::ServerToken(ServerConversationToken::new(
+                    token.to_string(),
+                )),
                 None,
                 ctx,
             );
-
-            assert!(matches!(
-                action,
-                Some(WorkspaceAction::OpenConversationTranscriptViewer {
-                    conversation_id,
-                    ambient_agent_task_id: None,
-                }) if conversation_id.as_str() == token
-            ));
+            assert!(action.is_none());
         });
     });
 }
@@ -1282,7 +1231,12 @@ fn test_resolve_copy_link_prefers_active_session_link() {
                 ctx,
             );
 
-            assert_eq!(link.as_deref(), Some(session_link));
+            assert_eq!(link, None);
+
+            let entry = AgentConversationsModel::as_ref(ctx)
+                .get_entry_by_id(&AgentConversationEntryId::AmbientRun(task_id), ctx)
+                .expect("task entry should exist");
+            assert!(!entry.capabilities.can_copy_link);
         });
     });
 }
@@ -1311,15 +1265,12 @@ fn test_resolve_copy_link_uses_cloud_conversation_link_for_inactive_task() {
                 ctx,
             );
 
-            assert_eq!(
-                link,
-                Some(ServerConversationToken::new(token.to_string()).conversation_link())
-            );
+            assert_eq!(link, None);
 
             let entry = AgentConversationsModel::as_ref(ctx)
                 .get_entry_by_id(&AgentConversationEntryId::AmbientRun(task_id), ctx)
                 .expect("task entry should exist");
-            assert!(entry.capabilities.can_copy_link);
+            assert!(!entry.capabilities.can_copy_link);
         });
     });
 }
@@ -1448,10 +1399,7 @@ fn test_server_token_assignment_updates_copy_link_resolution() {
                 )),
                 ctx,
             );
-            assert_eq!(
-                link,
-                Some(ServerConversationToken::new(token.to_string()).conversation_link())
-            );
+            assert_eq!(link, None);
         });
     });
 }
@@ -1578,15 +1526,12 @@ fn test_resolve_copy_link_uses_attached_synced_conversation_for_task_without_tok
                 ctx,
             );
 
-            assert_eq!(
-                link,
-                Some(ServerConversationToken::new(token.to_string()).conversation_link())
-            );
+            assert_eq!(link, None);
 
             let entry = AgentConversationsModel::as_ref(ctx)
                 .get_entry_by_id(&AgentConversationEntryId::AmbientRun(task_id), ctx)
                 .expect("task entry should exist");
-            assert!(entry.capabilities.can_copy_link);
+            assert!(!entry.capabilities.can_copy_link);
             assert_eq!(entry.identity.local_conversation_id, Some(conversation_id));
         });
     });

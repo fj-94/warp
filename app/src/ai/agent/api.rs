@@ -97,6 +97,7 @@ impl TryFrom<ServerConversationToken>
 pub struct RequestParams {
     pub input: Vec<AIAgentInput>,
     pub input_task_id: Option<TaskId>,
+    pub local_conversation_id: AIConversationId,
     pub conversation_token: Option<ServerConversationToken>,
     pub forked_from_conversation_token: Option<ServerConversationToken>,
     pub ambient_agent_task_id: Option<AmbientAgentTaskId>,
@@ -314,6 +315,7 @@ impl RequestParams {
         Self {
             input: request_input.all_inputs().cloned().collect(),
             input_task_id: request_input.input_messages.keys().next().cloned(),
+            local_conversation_id: conversation.id,
             conversation_token: conversation.server_conversation_token,
             forked_from_conversation_token: conversation.forked_from_conversation_token,
             ambient_agent_task_id: conversation.ambient_agent_task_id,

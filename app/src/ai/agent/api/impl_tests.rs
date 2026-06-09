@@ -2,6 +2,7 @@ use super::{
     api_keys_with_warp_credit_fallback_setting, get_supported_cli_agent_tools, get_supported_tools,
 };
 use crate::ai::agent::api::RequestParams;
+use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::blocklist::SessionContext;
 use crate::ai::llms::LLMId;
 use crate::terminal::model::session::SessionType;
@@ -18,6 +19,7 @@ fn request_params_with_ask_user_question_enabled(ask_user_question_enabled: bool
     RequestParams {
         input: vec![],
         input_task_id: None,
+        local_conversation_id: AIConversationId::new(),
         conversation_token: None,
         forked_from_conversation_token: None,
         ambient_agent_task_id: None,
@@ -85,6 +87,40 @@ fn has_system_content_containing(messages: &[super::ChatCompletionMessage], need
                 .as_deref()
                 .is_some_and(|content| content.contains(needle))
     })
+}
+
+fn api_user_query_message(task_id: &str, request_id: &str, query: &str) -> api::Message {
+    api::Message {
+        id: format!("{request_id}-user"),
+        task_id: task_id.to_string(),
+        server_message_data: String::new(),
+        citations: vec![],
+        message: Some(api::message::Message::UserQuery(api::message::UserQuery {
+            query: query.to_string(),
+            context: None,
+            referenced_attachments: Default::default(),
+            mode: None,
+            intended_agent: Default::default(),
+        })),
+        request_id: request_id.to_string(),
+        timestamp: None,
+    }
+}
+
+fn api_agent_output_message(task_id: &str, request_id: &str, text: &str) -> api::Message {
+    api::Message {
+        id: format!("{request_id}-assistant"),
+        task_id: task_id.to_string(),
+        server_message_data: String::new(),
+        citations: vec![],
+        message: Some(api::message::Message::AgentOutput(
+            api::message::AgentOutput {
+                text: text.to_string(),
+            },
+        )),
+        request_id: request_id.to_string(),
+        timestamp: None,
+    }
 }
 
 #[test]
@@ -318,6 +354,58 @@ fn test_actionresult_with_user_query_appends_user_prompt_without_continuation_in
                 .is_some_and(|content| content.contains("check memory"))
     }));
     assert!(!has_continue_after_tool_result_instruction(&messages));
+}
+
+#[test]
+fn test_local_openai_messages_restores_persisted_task_messages() {
+    let task_id = format!("test-restored-local-{}", uuid::Uuid::new_v4());
+
+    let mut params = request_params_with_ask_user_question_enabled(false);
+    let conversation_key = params.local_conversation_id.to_string();
+    super::LOCAL_CONVERSATIONS.lock().remove(&conversation_key);
+    params.input_task_id = Some(crate::ai::agent::task::TaskId::new(task_id.clone()));
+    params.tasks = vec![api::Task {
+        id: task_id.clone(),
+        messages: vec![
+            api_user_query_message(&task_id, "request-1", "first local question"),
+            api_agent_output_message(&task_id, "request-1", "first local answer"),
+        ],
+        dependencies: None,
+        description: String::new(),
+        summary: String::new(),
+        server_data: String::new(),
+    }];
+    params.input = vec![crate::ai::agent::AIAgentInput::UserQuery {
+        query: "continue locally".to_string(),
+        context: Arc::from([]),
+        static_query_type: None,
+        referenced_attachments: Default::default(),
+        user_query_mode: crate::ai::agent::UserQueryMode::Normal,
+        running_command: None,
+        intended_agent: None,
+    }];
+
+    let messages = super::local_openai_messages(&params);
+
+    assert!(messages.iter().any(|message| {
+        message.role == "user"
+            && message
+                .content
+                .as_deref()
+                .is_some_and(|content| content.contains("first local question"))
+    }));
+    assert!(messages.iter().any(|message| {
+        message.role == "assistant" && message.content.as_deref() == Some("first local answer")
+    }));
+    assert!(messages.iter().any(|message| {
+        message.role == "user"
+            && message
+                .content
+                .as_deref()
+                .is_some_and(|content| content.contains("continue locally"))
+    }));
+
+    super::LOCAL_CONVERSATIONS.lock().remove(&conversation_key);
 }
 
 #[test]
