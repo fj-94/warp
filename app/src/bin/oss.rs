@@ -5,26 +5,51 @@
 use anyhow::Result;
 use warp_core::{
     channel::{Channel, ChannelConfig, ChannelState, OzConfig, WarpServerConfig},
+    features::{self, FeatureFlag},
     AppId,
 };
 
 // Simple wrapper around warp::run() for Warp OSS builds.
 fn main() -> Result<()> {
+    let server_config = if cfg!(feature = "offline_oss") {
+        WarpServerConfig {
+            server_root_url: "http://127.0.0.1:9".into(),
+            rtc_server_url: "ws://127.0.0.1:9/graphql/v2".into(),
+            session_sharing_server_url: None,
+            firebase_auth_api_key: "".into(),
+        }
+    } else {
+        WarpServerConfig::production()
+    };
+    let oz_config = if cfg!(feature = "offline_oss") {
+        OzConfig {
+            oz_root_url: "http://127.0.0.1:9".into(),
+            workload_audience_url: Some("http://127.0.0.1:9".into()),
+        }
+    } else {
+        OzConfig::production()
+    };
     let mut state = ChannelState::new(
         Channel::Oss,
         ChannelConfig {
             app_id: AppId::new("dev", "warp", "WarpOss"),
             logfile_name: "warp-oss.log".into(),
-            server_config: WarpServerConfig::production(),
-            oz_config: OzConfig::production(),
+            server_config,
+            oz_config,
             telemetry_config: None,
             crash_reporting_config: None,
             autoupdate_config: None,
             mcp_static_config: None,
         },
     );
+    if cfg!(feature = "offline_oss") {
+        state = state.with_additional_features(&[
+            FeatureFlag::CustomInferenceEndpoints,
+            FeatureFlag::SoloUserByok,
+        ]);
+    }
     if cfg!(debug_assertions) {
-        state = state.with_additional_features(warp_core::features::DEBUG_FLAGS);
+        state = state.with_additional_features(features::DEBUG_FLAGS);
     }
     ChannelState::set(state);
 

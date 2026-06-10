@@ -133,6 +133,7 @@ use crate::code_review::git_status_update::{
 };
 use crate::code_review::telemetry_event::CodeReviewPaneEntrypoint;
 use crate::projects::ProjectManagementModel;
+#[cfg(feature = "remote_server_support")]
 use crate::remote_server::manager::{
     RemoteServerInitPhase, RemoteServerManager, RemoteServerManagerEvent,
 };
@@ -4348,6 +4349,7 @@ impl TerminalView {
 
         // Forward RemoteServerManager setup events into the terminal event stream
         // so the ModelEventDispatcher can gate session initialization on them.
+        #[cfg(feature = "remote_server_support")]
         if FeatureFlag::SshRemoteServer.is_enabled() {
             let mgr_handle = RemoteServerManager::handle(ctx);
             ctx.subscribe_to_model(&mgr_handle, |me, _, event, ctx| {
@@ -4435,7 +4437,7 @@ impl TerminalView {
                             );
                             me.show_ssh_remote_server_failed_banner(
                                 *session_id,
-                                remote_server::transport::UserFacingError {
+                                crate::remote_server::transport::UserFacingError {
                                     body: "Failed to start SSH extension".into(),
                                     detail: if error.is_empty() {
                                         None
@@ -4466,7 +4468,7 @@ impl TerminalView {
                         if *was_reconnect_attempt {
                             send_telemetry_from_ctx!(
                                 TelemetryEvent::RemoteServerReconnectExhausted {
-                                    attempts: remote_server::manager::MAX_RECONNECT_ATTEMPTS,
+                                    attempts: crate::remote_server::manager::MAX_RECONNECT_ATTEMPTS,
                                     remote_os,
                                     remote_arch,
                                     exit_code: exit_status.as_ref().and_then(|s| s.code),
@@ -4520,7 +4522,7 @@ impl TerminalView {
                             me.show_ssh_remote_server_failed_banner(
                                 *session_id,
                                 error.user_facing_error(
-                                    remote_server::transport::SetupStage::InstallBinary,
+                                    crate::remote_server::transport::SetupStage::InstallBinary,
                                 ),
                                 ctx,
                             );
@@ -4555,7 +4557,7 @@ impl TerminalView {
                             me.show_ssh_remote_server_failed_banner(
                                 *session_id,
                                 error.user_facing_error(
-                                    remote_server::transport::SetupStage::CheckBinary,
+                                    crate::remote_server::transport::SetupStage::CheckBinary,
                                 ),
                                 ctx,
                             );
@@ -12267,7 +12269,7 @@ impl TerminalView {
                 // that child via `kill_on_drop`, which closes the
                 // multiplexed channel on the ControlMaster so the foreground
                 // ssh can exit cleanly instead of hanging.
-                #[cfg(not(target_family = "wasm"))]
+                #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
                 if FeatureFlag::SshRemoteServer.is_enabled() {
                     use crate::remote_server::manager::RemoteServerManager;
                     RemoteServerManager::handle(ctx).update(
@@ -12285,7 +12287,10 @@ impl TerminalView {
             // Handled by RemoteServerController via model subscription.
             ModelEvent::SshInitShell { .. } => {}
             ModelEvent::RemoteServerBlockRequested { session_id } => {
+                #[cfg(feature = "remote_server_support")]
                 self.show_ssh_remote_server_choice_block(*session_id, ctx);
+                #[cfg(not(feature = "remote_server_support"))]
+                let _ = session_id;
             }
         }
     }
@@ -12430,7 +12435,7 @@ impl TerminalView {
     fn show_ssh_remote_server_failed_banner(
         &mut self,
         session_id: SessionId,
-        error: remote_server::transport::UserFacingError,
+        error: crate::remote_server::transport::UserFacingError,
         ctx: &mut ViewContext<Self>,
     ) {
         let already_present = self.rich_content_views.iter().any(|view| {

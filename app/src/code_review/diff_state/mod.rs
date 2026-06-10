@@ -23,6 +23,8 @@ mod local;
 pub(crate) use local::diff_metadata_against_head;
 pub use local::LocalDiffStateModel;
 
+#[cfg_attr(feature = "remote_server_support", path = "remote.rs")]
+#[cfg_attr(not(feature = "remote_server_support"), path = "remote_disabled.rs")]
 mod remote;
 pub use remote::RemoteDiffStateModel;
 

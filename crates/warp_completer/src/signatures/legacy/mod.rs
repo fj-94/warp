@@ -22,13 +22,28 @@ impl CommandRegistry {
         GLOBAL_REGISTRY
             .get_or_init(|| {
                 // TODO(wasm): Determine how to asynchronously load command signatures on wasm.
-                Arc::new(CommandRegistry::new_with_embedded_signatures())
+                Arc::new(CommandRegistry::new_global_registry())
             })
             .clone()
     }
 
+    fn new_global_registry() -> Self {
+        #[cfg(feature = "embedded_command_signatures")]
+        {
+            CommandRegistry::new_with_embedded_signatures()
+        }
+
+        #[cfg(not(feature = "embedded_command_signatures"))]
+        {
+            let registry = CommandRegistry::empty();
+            Self::register_warp_signatures(&registry);
+            registry
+        }
+    }
+
     /// Returns a new [`CommandRegistry`] that looks up commands in the embedded
     /// set of command signatures.
+    #[cfg(feature = "embedded_command_signatures")]
     fn new_with_embedded_signatures() -> Self {
         let registry = CommandRegistry::new(
             |command| {
@@ -99,6 +114,6 @@ impl CommandRegistry {
 #[cfg(feature = "test-util")]
 impl Default for CommandRegistry {
     fn default() -> Self {
-        CommandRegistry::new_with_embedded_signatures()
+        CommandRegistry::new_global_registry()
     }
 }

@@ -1,5 +1,4 @@
 use lsp::LspManagerModel;
-use remote_server::proto::TextEdit;
 use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::watcher::DirectoryWatcher;
 use repo_metadata::RepoMetadataModel;
@@ -10,6 +9,7 @@ use warp_util::standardized_path::StandardizedPath;
 use warpui::{App, ModelHandle, SingletonEntity};
 
 use crate::code::global_buffer_model::{CharOffsetEdit, GlobalBufferModel, GlobalBufferModelEvent};
+use crate::remote_server::proto::TextEdit;
 use crate::test_util::settings::initialize_settings_for_tests;
 
 // ── Test setup ────────────────────────────────────────────────────

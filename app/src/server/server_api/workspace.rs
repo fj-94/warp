@@ -1,7 +1,7 @@
-use super::{ServerApi, team::TeamClient};
+use super::{team::TeamClient, ServerApi};
 use crate::workspaces::user_workspaces::WorkspacesMetadataResponse;
 use crate::workspaces::workspace::AiOverages;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use cynic::{MutationBuilder, QueryBuilder};
 use warp_graphql::error::UserFacingErrorInterface;

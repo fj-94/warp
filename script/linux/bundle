@@ -22,6 +22,7 @@ trap cleanup EXIT
 # By default we build dev bundles.
 RELEASE_CHANNEL="dev"
 FEATURES="release_bundle,crash_reporting"
+NO_DEFAULT_FEATURES=false
 PACKAGES=( appimage )
 BUILD="true"
 BUILD_ARCH="$(uname -m)"
@@ -114,6 +115,8 @@ eval set -- "$PARAMS"
 
 if [[ $DEBUG = true ]]; then
   CARGO_PROFILE="dev"
+elif [[ $RELEASE_CHANNEL = "oss" ]]; then
+  CARGO_PROFILE="release-oss"
 elif [[ $RELEASE_CHANNEL = "local" || $RELEASE_CHANNEL = "dev" ]]; then
   # For dev bundles, we want to enable debug assertions to
   # catch violations that would otherwise silently pass in
@@ -176,9 +179,10 @@ elif [[ $RELEASE_CHANNEL = "oss" ]]; then
   WARP_BIN="warp-oss"
   BINARY_NAME="warp-oss"
   APP_NAME="WarpOss"
-  # The OSS channel does not ship Sentry, so drop the crash_reporting feature
-  # (which would otherwise pull in the Sentry SDK as a dependency).
-  FEATURES="release_bundle"
+  # The offline OSS bundle keeps local terminal/agent features and avoids
+  # compiling the default cloud-heavy feature set.
+  FEATURES="release_bundle,offline_oss"
+  NO_DEFAULT_FEATURES=true
 fi
 
 # Artifact-specific binary naming
@@ -195,12 +199,21 @@ fi
 if [[ "$ARTIFACT" == "cli" ]]; then
   FEATURES="$FEATURES,standalone"
 elif [[ "$ARTIFACT" == "app" ]]; then
-  FEATURES="$FEATURES,gui"
-  if [[ "$RELEASE_CHANNEL" == "local" || "$RELEASE_CHANNEL" == "dev" ]]; then
+  if [[ "$RELEASE_CHANNEL" != "oss" ]]; then
+    FEATURES="$FEATURES,gui"
+  fi
+  if [[ "$RELEASE_CHANNEL" == "oss" ]]; then
+    FEATURES="$FEATURES,nld_heuristic_v1"
+  elif [[ "$RELEASE_CHANNEL" == "local" || "$RELEASE_CHANNEL" == "dev" ]]; then
     FEATURES="$FEATURES,nld_classifier_v2,nld_heuristic_v2"
   else
     FEATURES="$FEATURES,nld_classifier_v1,nld_heuristic_v1"
   fi
+fi
+
+CARGO_FEATURE_ARGS=(--features "$FEATURES")
+if [[ "$NO_DEFAULT_FEATURES" == true ]]; then
+  CARGO_FEATURE_ARGS=(--no-default-features "${CARGO_FEATURE_ARGS[@]}")
 fi
 
 BUNDLE_ID="dev.warp.$APP_NAME"
@@ -216,14 +229,14 @@ export APPIMAGE_NAME="$APP_NAME-$BUILD_ARCH.AppImage"
 # then exit.  We use this script to invoke `cargo check` to ensure that we are
 # using the same feature flags and profile that we would be using in production.
 if [[ "$CHECK_ONLY" == "true" ]]; then
-  cargo check -p warp --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --features "$FEATURES"
+  cargo check -p warp --profile "$CARGO_PROFILE" --bin "$WARP_BIN" "${CARGO_FEATURE_ARGS[@]}"
   exit 0
 fi
 
 # Build the binary.
 if [[ "$BUILD" == "true" ]]; then
   echo "Building and bundling Warp for channel $RELEASE_CHANNEL and bundle id $BUNDLE_ID"
-  cargo build -p warp --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --features "$FEATURES"
+  cargo build -p warp --profile "$CARGO_PROFILE" --bin "$WARP_BIN" "${CARGO_FEATURE_ARGS[@]}"
   echo "Making debug copy of '$EXECUTABLE_PATH' at '$DEBUG_EXECUTABLE_PATH'"
   cp "$EXECUTABLE_PATH" "$DEBUG_EXECUTABLE_PATH"
 

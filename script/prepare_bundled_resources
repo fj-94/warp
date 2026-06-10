@@ -58,6 +58,22 @@ if [ -d "$RESOURCES_SRC/bundled" ]; then
   echo "Copying bundled resources to $DEST_DIR/bundled"
   rm -rf "$DEST_DIR/bundled"
   cp -R "$RESOURCES_SRC/bundled" "$DEST_DIR/bundled"
+  if [ "$CHANNEL" = "oss" ]; then
+    OFFLINE_EXCLUDED_BUNDLED_PATHS=(
+      "mcp_skills/figma"
+      "skills/claude-api"
+      "skills/feedback"
+      "skills/oz-platform"
+      "skills/pr-comments"
+    )
+    for relative_path in "${OFFLINE_EXCLUDED_BUNDLED_PATHS[@]}"; do
+      path_to_remove="$DEST_DIR/bundled/$relative_path"
+      if [ -e "$path_to_remove" ]; then
+        echo "  Removing offline OSS excluded resource: $relative_path"
+        rm -rf "$path_to_remove"
+      fi
+    done
+  fi
 else
   echo "Warning: No bundled directory found at $RESOURCES_SRC/bundled" >&2
 fi
@@ -94,11 +110,15 @@ ADDITIONAL_LICENSES=(
     "Hack Font|MIT|app/assets/bundled/fonts/hack/LICENSE.md"
     "Roboto Font|SIL Open Font License|app/assets/bundled/fonts/roboto/LICENSE.txt"
     "bash-preexec|MIT|app/assets/bundled/bootstrap/bash-preexec-LICENSE.md"
-    "Claude API Skill|Apache-2.0|resources/bundled/skills/claude-api/LICENSE.txt"
     "rudder-sdk-rust|MIT|app/src/server/telemetry/LICENSE-RUDDER-SDK-RUST.txt"
     "Windows Terminal|MIT|app/assets/windows/LICENSE-WINDOWS-TERMINAL"
     "GitHub Desktop|MIT|app/src/code_review/GITHUB-DESKTOP-LICENSE"
 )
+if [ "$CHANNEL" != "oss" ]; then
+  ADDITIONAL_LICENSES+=(
+    "Claude API Skill|Apache-2.0|resources/bundled/skills/claude-api/LICENSE.txt"
+  )
+fi
 
 # Build the third-party licenses file unless the NO_LICENSES envvar is set.
 if [ -z "$NO_LICENSES" ]; then
@@ -141,7 +161,11 @@ if [ "${SKIP_SETTINGS_SCHEMA:-}" != "1" ]; then
     if [ -n "$CARGO_PROFILE" ]; then
       SCHEMA_CMD+=(--profile "$CARGO_PROFILE")
     fi
-    SCHEMA_CMD+=(--manifest-path "$REPO_ROOT/Cargo.toml" --bin generate_settings_schema --)
+    SCHEMA_CMD+=(--manifest-path "$REPO_ROOT/Cargo.toml" --bin generate_settings_schema)
+    if [ "$CHANNEL" = "oss" ]; then
+      SCHEMA_CMD+=(--no-default-features --features offline_oss,release_bundle,nld_heuristic_v1)
+    fi
+    SCHEMA_CMD+=(--)
     if [ -n "$CHANNEL" ]; then
       SCHEMA_CMD+=(--channel "$CHANNEL")
     fi

@@ -41,6 +41,10 @@ impl WarpDriveSettings {
     /// Returns `false` when the user is anonymous or fully logged out,
     /// regardless of the user setting.
     pub fn is_warp_drive_enabled(app: &warpui::AppContext) -> bool {
+        if cfg!(feature = "offline_oss") {
+            return false;
+        }
+
         use warpui::SingletonEntity as _;
         let is_anonymous_or_logged_out = FeatureFlag::SkipFirebaseAnonymousUser.is_enabled()
             && crate::auth::AuthStateProvider::as_ref(app)

@@ -14,9 +14,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(feature = "remote_server_support")]
 use remote_server::client::RemoteServerClient;
+#[cfg(feature = "remote_server_support")]
 use remote_server::manager::RemoteServerManager;
+#[cfg(feature = "remote_server_support")]
 use warp_core::HostId;
+#[cfg(feature = "remote_server_support")]
 use warp_util::standardized_path::StandardizedPath;
 
 use futures::io::{AsyncBufReadExt, BufReader};
@@ -32,8 +36,10 @@ use repo_metadata::{
 use warp_util::content_version::ContentVersion;
 use warp_util::file::FileSaveError;
 use warp_util::file::{FileId, FileLoadError};
+#[cfg(feature = "remote_server_support")]
+use warpui::AppContext;
 use warpui::ModelHandle;
-use warpui::{r#async::SpawnedFutureHandle, AppContext, Entity, ModelContext, SingletonEntity};
+use warpui::{r#async::SpawnedFutureHandle, Entity, ModelContext, SingletonEntity};
 use watcher::{BulkFilesystemWatcher, BulkFilesystemWatcherEvent};
 
 pub mod text_file_reader;
@@ -94,6 +100,7 @@ enum WatcherType {
 /// Remote files dispatch through [`RemoteServerClient`] via [`RemoteServerManager`].
 enum FileBackend {
     Local(LocalFile),
+    #[cfg(feature = "remote_server_support")]
     Remote {
         /// Identifies the remote host. The actual client is looked up from
         /// [`RemoteServerManager`] at call time, which naturally handles
@@ -109,6 +116,7 @@ impl FileBackend {
     fn as_local(&self) -> Option<&LocalFile> {
         match self {
             FileBackend::Local(f) => Some(f),
+            #[cfg(feature = "remote_server_support")]
             FileBackend::Remote { .. } => None,
         }
     }
@@ -116,6 +124,7 @@ impl FileBackend {
     fn version(&self) -> Option<ContentVersion> {
         match self {
             FileBackend::Local(f) => f.version,
+            #[cfg(feature = "remote_server_support")]
             FileBackend::Remote { .. } => None,
         }
     }
@@ -123,6 +132,7 @@ impl FileBackend {
     fn set_version(&mut self, version: ContentVersion) {
         match self {
             FileBackend::Local(f) => f.version = Some(version),
+            #[cfg(feature = "remote_server_support")]
             FileBackend::Remote { .. } => {}
         }
     }
@@ -188,6 +198,7 @@ impl FileState {
         self.files.insert(file_id, FileBackend::Local(local_file));
     }
 
+    #[cfg(feature = "remote_server_support")]
     fn insert_remote(&mut self, file_id: FileId, host_id: HostId, path: StandardizedPath) {
         self.files
             .insert(file_id, FileBackend::Remote { host_id, path });
@@ -216,6 +227,7 @@ impl FileState {
                     false
                 }
             }
+            #[cfg(feature = "remote_server_support")]
             FileBackend::Remote { .. } => false,
         };
         Some((backend, path_still_used))
@@ -242,6 +254,7 @@ impl FileState {
             .iter_mut()
             .filter_map(|(id, backend)| match backend {
                 FileBackend::Local(f) => Some((id, f)),
+                #[cfg(feature = "remote_server_support")]
                 FileBackend::Remote { .. } => None,
             })
     }
@@ -346,6 +359,7 @@ impl FileModel {
     ///
     /// The returned `FileId` can be used with `save()` and `delete()` which
     /// will dispatch to the remote backend via [`RemoteServerClient`].
+    #[cfg(feature = "remote_server_support")]
     pub fn register_remote_file(&mut self, host_id: HostId, path: StandardizedPath) -> FileId {
         let file_id = FileId::new();
         self.file_state.insert_remote(file_id, host_id, path);
@@ -737,6 +751,7 @@ impl FileModel {
                     },
                 );
             }
+            #[cfg(feature = "remote_server_support")]
             FileBackend::Remote { host_id, path } => {
                 let client = Self::resolve_remote_client(host_id, ctx)?;
                 let path = path.as_str().to_string();
@@ -888,6 +903,7 @@ impl FileModel {
                     },
                 );
             }
+            #[cfg(feature = "remote_server_support")]
             FileBackend::Remote { host_id, path } => {
                 let client = Self::resolve_remote_client(host_id, ctx)?;
                 let path = path.as_str().to_string();
@@ -918,6 +934,7 @@ impl FileModel {
     }
 
     /// Look up the `RemoteServerClient` for a given host at call time.
+    #[cfg(feature = "remote_server_support")]
     fn resolve_remote_client(
         host_id: &HostId,
         ctx: &AppContext,

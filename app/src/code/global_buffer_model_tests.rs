@@ -1,5 +1,4 @@
 use lsp::LspManagerModel;
-use remote_server::proto::TextEdit;
 use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::watcher::DirectoryWatcher;
 use repo_metadata::RepoMetadataModel;
@@ -10,6 +9,7 @@ use warp_util::standardized_path::StandardizedPath;
 use warpui::{App, ModelHandle, SingletonEntity};
 
 use super::{BufferSource, CharOffsetEdit, GlobalBufferModel, PendingEditBatch};
+use crate::remote_server::proto::TextEdit;
 use crate::test_util::settings::initialize_settings_for_tests;
 
 // ── Test-only helpers on GlobalBufferModel ────────────────────────
@@ -48,7 +48,7 @@ impl GlobalBufferModel {
         &mut self,
         file_id: warp_util::file::FileId,
         expected_server_version: u64,
-        edits: Vec<remote_server::proto::TextEdit>,
+        edits: Vec<TextEdit>,
         client_version: ContentVersion,
     ) {
         let Some(state) = self.buffers.get_mut(&file_id) else {

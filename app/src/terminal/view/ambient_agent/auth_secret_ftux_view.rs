@@ -1,11 +1,11 @@
 use crate::view_components::DismissibleToast;
+use crate::warp_managed_secrets::client::SecretOwner;
 use crate::workspace::ToastStack;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use warp_cli::agent::Harness;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::Fill;
-use warp_managed_secrets::client::SecretOwner;
 use warpui::elements::{
     Border, ChildAnchor, ChildView, Clipped, ConstrainedBox, Container, CornerRadius,
     CrossAxisAlignment, Empty, Expanded, Flex, Hoverable, MainAxisAlignment, MainAxisSize,

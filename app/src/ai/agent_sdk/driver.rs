@@ -25,6 +25,7 @@ use oneshot::{Canceled, Receiver, Sender};
 use repo_metadata::{local_model::IndexedRepoState, RepoMetadataModel, RepositoryIdentifier};
 use uuid::Uuid;
 
+use crate::warp_managed_secrets::ManagedSecretValue;
 use ai::skills::{ParsedSkill, SKILL_PROVIDER_DEFINITIONS};
 use warp_cli::agent::{Harness, OutputFormat};
 use warp_cli::mcp::MCPSpec;
@@ -34,7 +35,6 @@ use warp_core::{
     features::FeatureFlag, report_error, report_if_error, safe_debug, safe_error, safe_info,
 };
 use warp_graphql::ai::AgentTaskState;
-use warp_managed_secrets::ManagedSecretValue;
 use warpui::{
     r#async::{FutureExt, TimeoutError},
     AppContext, Entity, ModelContext, ModelHandle, ModelSpawner, SingletonEntity,

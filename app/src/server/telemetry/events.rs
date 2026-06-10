@@ -58,6 +58,7 @@ use crate::notebooks::NotebookLocation;
 use crate::palette::PaletteMode;
 use crate::pane_group::PaneDragDropLocation;
 use crate::prompt::editor_modal::OpenSource as PromptEditorOpenSource;
+use crate::remote_server;
 use crate::search::command_search::searcher::CommandSearchItemAction;
 use crate::search::QueryFilter;
 use crate::server::block::DisplaySetting;

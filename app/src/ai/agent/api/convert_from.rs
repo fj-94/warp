@@ -9,10 +9,11 @@ use crate::ai::agent::comment::CodeReview;
 use crate::ai::agent::task::TaskId;
 use crate::ai::agent::todos::AIAgentTodoList;
 use crate::ai::agent::{
-    AIAgentAction, AIAgentActionType, AIAgentCitation, AIAgentInput, AIAgentOutputMessage,
-    AIAgentText, AIAgentTodo, ArtifactCreatedData, MessageId, RunAgentsAgentRunConfig,
-    RunAgentsExecutionMode, RunAgentsRequest, StartAgentExecutionMode, SuggestedAgentModeWorkflow,
-    SuggestedRule, Suggestions, TodoOperation, util::parse_markdown_into_text_and_code_sections,
+    util::parse_markdown_into_text_and_code_sections, AIAgentAction, AIAgentActionType,
+    AIAgentCitation, AIAgentInput, AIAgentOutputMessage, AIAgentText, AIAgentTodo,
+    ArtifactCreatedData, MessageId, RunAgentsAgentRunConfig, RunAgentsExecutionMode,
+    RunAgentsRequest, StartAgentExecutionMode, SuggestedAgentModeWorkflow, SuggestedRule,
+    Suggestions, TodoOperation,
 };
 use crate::ai::agent::{
     CloneRepositoryURL, SubagentCall, SubagentType, SummarizationType, WebFetchStatus,
@@ -20,10 +21,10 @@ use crate::ai::agent::{
 };
 use crate::ai::artifact_download::sanitized_basename;
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentVersion};
-use ai::agent::UnknownCitationTypeError;
 use ai::agent::action::LifecycleEventType as StartAgentLifecycleEventType;
 use ai::agent::action_result::StartAgentVersion;
 use ai::agent::convert::ToolToAIAgentActionError;
+use ai::agent::UnknownCitationTypeError;
 use ai::skills::SkillReference;
 use api::ask_user_question::question::QuestionType;
 use warp_core::channel::ChannelState;
@@ -765,7 +766,7 @@ impl ConvertAPIToolCallToAIAgentAction for api::message::ToolCall {
             }
             api::message::tool_call::Tool::Subagent(subagent) => {
                 use api::message::tool_call::subagent::{
-                    Metadata, conversation_search_metadata::Target,
+                    conversation_search_metadata::Target, Metadata,
                 };
                 let subagent_type = match subagent.metadata {
                     Some(Metadata::Cli(_)) => SubagentType::Cli,

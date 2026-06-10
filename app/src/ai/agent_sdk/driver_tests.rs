@@ -25,11 +25,11 @@ use crate::ai::agent::{
 };
 use crate::ai::mcp::parsing::normalize_mcp_json;
 use crate::ai::{agent_sdk::task_env_vars, ambient_agents::AmbientAgentTaskId};
+use crate::warp_managed_secrets::ManagedSecretValue;
 use crate::{
     ai::{cloud_environments::GithubRepo, skills::SkillManager},
     test_util::terminal::{add_window_with_terminal, initialize_app_for_terminal_view},
 };
-use warp_managed_secrets::ManagedSecretValue;
 
 #[test]
 fn test_normalize_single_cli_server() {

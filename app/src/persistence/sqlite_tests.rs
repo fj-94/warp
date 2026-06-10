@@ -36,13 +36,14 @@ fn app_scope_database_path_matches_app_database_path() {
     );
 }
 
+#[cfg(feature = "remote_server_support")]
 #[test]
 fn remote_server_daemon_scope_database_path_uses_identity_data_dir() {
     let path = database_file_path_for_scope(&PersistenceScope::RemoteServerDaemon {
         identity_key: "user@example.com/ssh host".to_string(),
     });
     let expected_data_dir =
-        remote_server::setup::remote_server_daemon_data_dir("user@example.com/ssh host");
+        crate::remote_server::setup::remote_server_daemon_data_dir("user@example.com/ssh host");
 
     assert!(path.is_absolute());
     assert_eq!(
@@ -51,12 +52,13 @@ fn remote_server_daemon_scope_database_path_uses_identity_data_dir() {
     );
 }
 
+#[cfg(feature = "remote_server_support")]
 #[test]
 fn remote_server_daemon_scope_database_path_handles_empty_identity_key() {
     let path = database_file_path_for_scope(&PersistenceScope::RemoteServerDaemon {
         identity_key: String::new(),
     });
-    let expected_data_dir = remote_server::setup::remote_server_daemon_data_dir("");
+    let expected_data_dir = crate::remote_server::setup::remote_server_daemon_data_dir("");
 
     assert_eq!(
         path,

@@ -44,7 +44,7 @@ warp-command-signatures = {workspace = true}
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 command = { path = "../command" }
 rquickjs = { workspace = true, optional = true }
-warp-command-signatures = {workspace = true, features = ["embed-signatures"]}
+warp-command-signatures = {workspace = true}
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 command = { path = "../command", features = ["test-util"] }
@@ -59,4 +59,5 @@ warp_completer = { path = ".", features = ["test-util"] }
 # Note that this feature is only compatible with non-wasm targets.
 v2 = ["dep:warp_js", "dep:rquickjs"]
 # Enables utilities for testing.
-test-util = ["warp_js?/test-util"]
+test-util = ["embedded_command_signatures", "warp_js?/test-util"]
+embedded_command_signatures = ["warp-command-signatures/embed-signatures"]

@@ -1,7 +1,7 @@
 #[cfg(feature = "local_fs")]
-use indexmap::IndexSet;
+use crate::remote_server::manager::RemoteServerManager;
 #[cfg(feature = "local_fs")]
-use remote_server::manager::RemoteServerManager;
+use indexmap::IndexSet;
 #[cfg(feature = "local_fs")]
 use repo_metadata::repositories::DetectedRepositories;
 use std::collections::HashMap;

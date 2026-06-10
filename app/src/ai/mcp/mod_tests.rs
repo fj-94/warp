@@ -7,9 +7,9 @@ use crate::ai::mcp::{
     TemplatableMCPServer, TemplatableMCPServerInstallation, TemplateVariable, TransportType,
     VariableType, VariableValue,
 };
+use crate::warp_managed_secrets::ManagedSecretValue;
 use serde_json;
 use std::collections::HashMap;
-use warp_managed_secrets::ManagedSecretValue;
 
 #[test]
 fn mcp_provider_from_file_path_recognizes_warp_home_path() {

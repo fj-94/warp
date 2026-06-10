@@ -9,7 +9,7 @@ use super::{
     },
     LocalOnlyIconState, SettingsAction, SettingsSection, ToggleSettingActionPair, ToggleState,
 };
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
 use crate::remote_server::codebase_index_model::{
     RemoteCodebaseIndexModel, RemoteCodebaseIndexModelEvent, RemoteCodebaseIndexSettingsEntry,
 };
@@ -52,7 +52,7 @@ use ai::workspace::WorkspaceMetadata;
 use lsp::supported_servers::LSPServerType;
 use lsp::{LspManagerModel, LspManagerModelEvent, LspServerModel, LspState};
 use pathfinder_color::ColorU;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
 use remote_server::codebase_index_proto::{RemoteCodebaseIndexState, RemoteCodebaseIndexStatus};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -64,7 +64,7 @@ use warp_core::{
     ui::theme::{AnsiColorIdentifier, Fill as ThemeFill},
 };
 use warp_util::path::user_friendly_path;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
 use warp_util::remote_path::RemotePath;
 use warpui::{
     elements::{
@@ -102,7 +102,7 @@ const INDEXING_WORKSPACE_ENABLED_ADMIN_TEXT: &str = "Team admins have enabled co
 const INDEXING_DISABLED_GLOBAL_AI_TEXT: &str =
     "AI Features must be enabled to use codebase indexing.";
 const CODEBASE_INDEX_LIMIT_REACHED: &str = "You have reached the maximum number of codebase indices for your plan. Delete existing indices to auto-index new codebases.";
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
 const REMOTE_CODEBASE_INDEX_LIMIT_REACHED_FAILURE: &str =
     "maximum number of codebase indexes has been reached";
 
@@ -132,7 +132,7 @@ impl CodeSubpage {
     }
 }
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
 fn remote_codebase_index_limit_reached(status: &RemoteCodebaseIndexStatus) -> bool {
     status
         .failure_message
@@ -140,7 +140,7 @@ fn remote_codebase_index_limit_reached(status: &RemoteCodebaseIndexStatus) -> bo
         .is_some_and(|message| message.contains(REMOTE_CODEBASE_INDEX_LIMIT_REACHED_FAILURE))
 }
 
-#[cfg(all(test, not(target_family = "wasm")))]
+#[cfg(all(test, not(target_family = "wasm"), feature = "remote_server_support"))]
 mod tests {
     use remote_server::codebase_index_proto::{
         RemoteCodebaseIndexState, RemoteCodebaseIndexStatus,
@@ -192,9 +192,9 @@ struct LspServerRowMouseStates {
 struct InitializedFoldersMouseStates {
     codebase_manual_resync: Vec<MouseStateHandle>,
     codebase_delete: Vec<MouseStateHandle>,
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
     remote_codebase_manual_resync: Vec<MouseStateHandle>,
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
     remote_codebase_delete: Vec<MouseStateHandle>,
     lsp_rows: Vec<LspServerRowMouseStates>,
     open_project_rules: Vec<MouseStateHandle>,
@@ -214,7 +214,7 @@ enum IndexingRefreshAction {
     /// Remote rows use the same refresh icon for both "create an index for this remote path" and
     /// "refresh an existing index". Missing or disabled remote indexes need a request/create call
     /// because resync only applies once the daemon already has index state for that path.
-    #[cfg_attr(target_family = "wasm", allow(dead_code))]
+    #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
     RequestRemote,
     Resync,
 }
@@ -223,9 +223,9 @@ pub struct CodeSettingsPageView {
     active_subpage: Option<CodeSubpage>,
     codebase_manual_resync_mouse_states: Vec<MouseStateHandle>,
     codebase_delete_mouse_states: Vec<MouseStateHandle>,
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
     remote_codebase_manual_resync_mouse_states: Vec<MouseStateHandle>,
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
     remote_codebase_delete_mouse_states: Vec<MouseStateHandle>,
     /// Mouse states for LSP server row buttons.
     /// This is kept separate from the codebase mouse states because each workspace/folder
@@ -273,7 +273,7 @@ impl CodeSettingsPageView {
             }
         });
 
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
         let remote_codebase_count = {
             let remote_index_model = RemoteCodebaseIndexModel::handle(ctx);
             let remote_codebase_count = remote_index_model.as_ref(ctx).entries_for_settings().len();
@@ -442,11 +442,11 @@ impl CodeSettingsPageView {
                 .map(|_| Default::default())
                 .collect(),
             codebase_delete_mouse_states: (0..codebase_count).map(|_| Default::default()).collect(),
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
             remote_codebase_manual_resync_mouse_states: (0..remote_codebase_count)
                 .map(|_| Default::default())
                 .collect(),
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
             remote_codebase_delete_mouse_states: (0..remote_codebase_count)
                 .map(|_| Default::default())
                 .collect(),
@@ -642,11 +642,11 @@ pub enum CodeSettingsPageAction {
     ToggleAutoIndexing,
     ManualResync(PathBuf),
     DeleteIndex(PathBuf),
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
     RequestRemoteIndex(RemotePath),
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
     ManualResyncRemote(RemotePath),
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
     DeleteRemoteIndex(RemotePath),
     ManualAddDirectory,
     SignupAnonymousUser,
@@ -746,19 +746,19 @@ impl TypedActionView for CodeSettingsPageView {
                     manager.drop_index(repo_path.clone(), ctx);
                 });
             }
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
             CodeSettingsPageAction::RequestRemoteIndex(remote_path) => {
                 RemoteCodebaseIndexModel::handle(ctx).update(ctx, |model, ctx| {
                     model.request_index(remote_path.clone(), ctx);
                 });
             }
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
             CodeSettingsPageAction::ManualResyncRemote(remote_path) => {
                 RemoteCodebaseIndexModel::handle(ctx).update(ctx, |model, ctx| {
                     model.resync_index(remote_path.clone(), ctx);
                 });
             }
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
             CodeSettingsPageAction::DeleteRemoteIndex(remote_path) => {
                 RemoteCodebaseIndexModel::handle(ctx).update(ctx, |model, ctx| {
                     model.drop_index(remote_path.clone(), ctx);
@@ -1037,9 +1037,9 @@ impl SettingsWidget for CodePageWidget {
         let mouse_states = InitializedFoldersMouseStates {
             codebase_manual_resync: view.codebase_manual_resync_mouse_states.clone(),
             codebase_delete: view.codebase_delete_mouse_states.clone(),
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
             remote_codebase_manual_resync: view.remote_codebase_manual_resync_mouse_states.clone(),
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
             remote_codebase_delete: view.remote_codebase_delete_mouse_states.clone(),
             lsp_rows: view.lsp_row_mouse_states.clone(),
             open_project_rules: view.open_project_rules_mouse_states.clone(),
@@ -1297,9 +1297,9 @@ impl CodePageWidget {
         let InitializedFoldersMouseStates {
             codebase_manual_resync: codebase_manual_resync_mouse_states,
             codebase_delete: codebase_delete_mouse_states,
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
                 remote_codebase_manual_resync: remote_codebase_manual_resync_mouse_states,
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
                 remote_codebase_delete: remote_codebase_delete_mouse_states,
             lsp_rows: lsp_row_mouse_states,
             open_project_rules: open_project_rules_mouse_states,
@@ -1337,7 +1337,7 @@ impl CodePageWidget {
         // Get workspaces from PersistedWorkspace
         let workspaces: Vec<WorkspaceMetadata> =
             PersistedWorkspace::as_ref(app).workspaces().collect();
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
         let remote_entries = if FeatureFlag::RemoteCodebaseIndexing.is_enabled() {
             RemoteCodebaseIndexModel::as_ref(app).entries_for_settings()
         } else {
@@ -1415,7 +1415,7 @@ impl CodePageWidget {
                 app,
             ));
         }
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
         for (entry_idx, entry) in remote_entries.iter().enumerate() {
             rendered_folder = true;
             let resync_mouse = remote_codebase_manual_resync_mouse_states
@@ -1562,7 +1562,7 @@ impl CodePageWidget {
         self.render_workspace_row_container(workspace_content.finish(), appearance)
     }
 
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
     fn render_remote_workspace_row(
         &self,
         entry: &RemoteCodebaseIndexSettingsEntry,
@@ -1781,7 +1781,7 @@ impl CodePageWidget {
         }
     }
 
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
     fn remote_indexing_status_presentation(
         &self,
         status: &RemoteCodebaseIndexStatus,
@@ -1941,9 +1941,13 @@ impl CodePageWidget {
                                     codebase_path.clone(),
                                 ));
                             }
+                            #[cfg(feature = "remote_server_support")]
                             (LocalOrRemotePath::Local(_), IndexingRefreshAction::RequestRemote) => {
                             }
-                            #[cfg(not(target_family = "wasm"))]
+                            #[cfg(all(
+                                not(target_family = "wasm"),
+                                feature = "remote_server_support"
+                            ))]
                             (
                                 LocalOrRemotePath::Remote(remote_path),
                                 IndexingRefreshAction::Resync,
@@ -1952,7 +1956,10 @@ impl CodePageWidget {
                                     CodeSettingsPageAction::ManualResyncRemote(remote_path.clone()),
                                 );
                             }
-                            #[cfg(not(target_family = "wasm"))]
+                            #[cfg(all(
+                                not(target_family = "wasm"),
+                                feature = "remote_server_support"
+                            ))]
                             (
                                 LocalOrRemotePath::Remote(remote_path),
                                 IndexingRefreshAction::RequestRemote,
@@ -1961,7 +1968,10 @@ impl CodePageWidget {
                                     CodeSettingsPageAction::RequestRemoteIndex(remote_path.clone()),
                                 );
                             }
-                            #[cfg(target_family = "wasm")]
+                            #[cfg(any(
+                                target_family = "wasm",
+                                not(feature = "remote_server_support")
+                            ))]
                             (LocalOrRemotePath::Remote(_), _) => {}
                         })
                         .finish(),
@@ -1984,13 +1994,19 @@ impl CodePageWidget {
                                     codebase_path.clone(),
                                 ));
                             }
-                            #[cfg(not(target_family = "wasm"))]
+                            #[cfg(all(
+                                not(target_family = "wasm"),
+                                feature = "remote_server_support"
+                            ))]
                             LocalOrRemotePath::Remote(remote_path) => {
                                 ctx.dispatch_typed_action(
                                     CodeSettingsPageAction::DeleteRemoteIndex(remote_path.clone()),
                                 );
                             }
-                            #[cfg(target_family = "wasm")]
+                            #[cfg(any(
+                                target_family = "wasm",
+                                not(feature = "remote_server_support")
+                            ))]
                             LocalOrRemotePath::Remote(_) => {}
                         })
                         .finish(),
@@ -2560,9 +2576,9 @@ impl SettingsWidget for CodebaseIndexingCategorizedWidget {
         let mouse_states = InitializedFoldersMouseStates {
             codebase_manual_resync: view.codebase_manual_resync_mouse_states.clone(),
             codebase_delete: view.codebase_delete_mouse_states.clone(),
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
             remote_codebase_manual_resync: view.remote_codebase_manual_resync_mouse_states.clone(),
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
             remote_codebase_delete: view.remote_codebase_delete_mouse_states.clone(),
             lsp_rows: view.lsp_row_mouse_states.clone(),
             open_project_rules: view.open_project_rules_mouse_states.clone(),

@@ -24,7 +24,8 @@ use warp_util::standardized_path::StandardizedPath;
 use warpui::r#async::Timer;
 use warpui::{Entity, ModelContext, ModelHandle, SingletonEntity, WeakModelHandle};
 
-use remote_server::manager::RemoteServerManager;
+use crate::remote_server;
+use crate::remote_server::manager::RemoteServerManager;
 
 use super::buffer_location::{LocalOrRemotePath, SyncClock};
 
@@ -335,9 +336,9 @@ impl GlobalBufferModel {
         );
 
         // Subscribe to remote buffer updates from the RemoteServerManager.
-        #[cfg(feature = "local_tty")]
+        #[cfg(all(feature = "local_tty", feature = "remote_server_support"))]
         if FeatureFlag::SshRemoteServer.is_enabled() {
-            use remote_server::manager::{RemoteServerManager, RemoteServerManagerEvent};
+            use crate::remote_server::manager::{RemoteServerManager, RemoteServerManagerEvent};
             let mgr = RemoteServerManager::handle(_ctx);
             _ctx.subscribe_to_model(&mgr, |me, event, ctx| match event {
                 RemoteServerManagerEvent::BufferUpdated {

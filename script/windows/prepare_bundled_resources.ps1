@@ -49,6 +49,23 @@ if (Test-Path $BundledSource -PathType Container) {
         Remove-Item -Path $BundledDestination -Recurse -Force
     }
     Copy-Item -Path $BundledSource -Destination $BundledDestination -Recurse -Force
+
+    if ($Channel -eq 'oss') {
+        $OfflineExcludedBundledPaths = @(
+            'mcp_skills\figma',
+            'skills\claude-api',
+            'skills\feedback',
+            'skills\oz-platform',
+            'skills\pr-comments'
+        )
+        foreach ($RelativePath in $OfflineExcludedBundledPaths) {
+            $PathToRemove = Join-Path $BundledDestination $RelativePath
+            if (Test-Path $PathToRemove) {
+                Write-Output "  Removing offline OSS excluded resource: $RelativePath"
+                Remove-Item -Path $PathToRemove -Recurse -Force
+            }
+        }
+    }
 } else {
     Write-Warning "No bundled directory found at $BundledSource"
 }
@@ -126,11 +143,15 @@ $AdditionalLicenses = @(
     @{ Name = 'Hack Font'; License = 'MIT'; Path = 'app\assets\bundled\fonts\hack\LICENSE.md' },
     @{ Name = 'Roboto Font'; License = 'SIL Open Font License'; Path = 'app\assets\bundled\fonts\roboto\LICENSE.txt' },
     @{ Name = 'bash-preexec'; License = 'MIT'; Path = 'app\assets\bundled\bootstrap\bash-preexec-LICENSE.md' },
-    @{ Name = 'Claude API Skill'; License = 'Apache-2.0'; Path = 'resources\bundled\skills\claude-api\LICENSE.txt' },
     @{ Name = 'rudder-sdk-rust'; License = 'MIT'; Path = 'app\src\server\telemetry\LICENSE-RUDDER-SDK-RUST.txt' },
     @{ Name = 'Windows Terminal'; License = 'MIT'; Path = 'app\assets\windows\LICENSE-WINDOWS-TERMINAL' },
     @{ Name = 'GitHub Desktop'; License = 'MIT'; Path = 'app\src\code_review\GITHUB-DESKTOP-LICENSE' }
 )
+if ($Channel -ne 'oss') {
+    $AdditionalLicenses += @(
+        @{ Name = 'Claude API Skill'; License = 'Apache-2.0'; Path = 'resources\bundled\skills\claude-api\LICENSE.txt' }
+    )
+}
 # Windows-only components:
 $AdditionalLicenses += @(
     @{ Name = 'OpenConsole / ConPTY (Windows Terminal)'; License = 'MIT'; Path = 'app\assets\windows\LICENSE-WINDOWS-TERMINAL' },
@@ -169,6 +190,11 @@ if ($env:SKIP_SETTINGS_SCHEMA -ne '1') {
         $SchemaCmd += @('--profile', $CargoProfile)
     }
     $SchemaCmd += @('--manifest-path', (Join-Path $RepoRoot 'Cargo.toml'), '--bin', 'generate_settings_schema', '--')
+    if ($Channel -eq 'oss') {
+        $SchemaCmd = $SchemaCmd[0..($SchemaCmd.Length - 2)] +
+            @('--no-default-features', '--features', 'offline_oss,release_bundle,nld_heuristic_v1') +
+            $SchemaCmd[($SchemaCmd.Length - 1)]
+    }
     if ($Channel) {
         $SchemaCmd += @('--channel', $Channel)
     }

@@ -22,7 +22,7 @@ use crate::server::server_api::ServerApi;
 use crate::terminal::model::block::BlockId;
 use crate::terminal::model::session::ExecuteCommandOptions;
 use crate::terminal::CLIAgent;
-use warp_managed_secrets::ManagedSecretValue;
+use crate::warp_managed_secrets::ManagedSecretValue;
 
 use super::super::terminal::{CommandHandle, TerminalDriver};
 use super::super::{AgentDriver, AgentDriverError};

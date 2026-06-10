@@ -1,5 +1,5 @@
 use super::ServerApi;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use cynic::{MutationBuilder, QueryBuilder};
 

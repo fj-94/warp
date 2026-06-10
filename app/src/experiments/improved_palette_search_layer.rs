@@ -2,6 +2,7 @@ use crate::experiments::{BucketRange, Experiment, Layer};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::str::FromStr;
+#[cfg(feature = "use_tantivy_search")]
 use warpui::AppContext;
 
 lazy_static! {
@@ -64,6 +65,7 @@ impl FromStr for ImprovedPaletteSearch {
 }
 
 impl ImprovedPaletteSearch {
+    #[cfg(feature = "use_tantivy_search")]
     pub fn improved_search_enabled(ctx: &mut AppContext) -> bool {
         matches!(Self::get_group(ctx), Some(Self::Experiment))
     }

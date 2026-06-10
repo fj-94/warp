@@ -9,13 +9,6 @@ use crate::{
     },
     channel::ChannelState,
     cloud_object::{
-        BulkCreateCloudObjectResult, BulkCreateGenericStringObjectsRequest,
-        CreateCloudObjectResult, CreateObjectRequest, CreatedCloudObject, GenericCloudObject,
-        GenericServerObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType, ObjectDeleteResult, ObjectIdType, ObjectMetadataUpdateResult,
-        ObjectPermissionUpdateResult, ObjectPermissionsUpdateData, ObjectType, ObjectsToUpdate,
-        Owner, Revision, RevisionAndLastEditor, ServerCloudObject, ServerFolder, ServerMetadata,
-        ServerNotebook, ServerObject, ServerPermissions, ServerWorkflow, UpdateCloudObjectResult,
         model::{
             actions::{ObjectActionHistory, ObjectActionType},
             generic_string_model::{
@@ -23,6 +16,13 @@ use crate::{
             },
             json_model::JsonSerializer,
         },
+        BulkCreateCloudObjectResult, BulkCreateGenericStringObjectsRequest,
+        CreateCloudObjectResult, CreateObjectRequest, CreatedCloudObject, GenericCloudObject,
+        GenericServerObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
+        JsonObjectType, ObjectDeleteResult, ObjectIdType, ObjectMetadataUpdateResult,
+        ObjectPermissionUpdateResult, ObjectPermissionsUpdateData, ObjectType, ObjectsToUpdate,
+        Owner, Revision, RevisionAndLastEditor, ServerCloudObject, ServerFolder, ServerMetadata,
+        ServerNotebook, ServerObject, ServerPermissions, ServerWorkflow, UpdateCloudObjectResult,
     },
     drive::{folders::FolderId, sharing::SharingAccessLevel},
     env_vars::EnvVarCollection,
@@ -34,14 +34,14 @@ use crate::{
         },
         graphql::{get_request_context, get_user_facing_error_message},
         ids::{ClientId, HashableId, ServerId, ServerIdAndType, SyncId, ToServerId},
-        server_api::{ServerApi, auth::AuthClient},
+        server_api::{auth::AuthClient, ServerApi},
         sync_queue::SerializedModel,
     },
     settings::Preference,
-    workflows::{WorkflowId, workflow_enum::WorkflowEnum},
+    workflows::{workflow_enum::WorkflowEnum, WorkflowId},
     workspaces::user_profiles::UserProfileWithUID,
 };
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use async_channel::Sender;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -235,7 +235,7 @@ pub trait ObjectClient: 'static + Send + Sync {
     async fn grab_notebook_edit_access(&self, notebook_id: NotebookId) -> Result<ServerMetadata>;
     /// Sets the current editor of the notebook to be null
     async fn give_up_notebook_edit_access(&self, notebook_id: NotebookId)
-    -> Result<ServerMetadata>;
+        -> Result<ServerMetadata>;
 
     /// Gets updates for all Warp Drive actions.
     async fn get_warp_drive_updates(

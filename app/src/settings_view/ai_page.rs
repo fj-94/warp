@@ -7051,10 +7051,7 @@ impl ApiKeysWidget {
             FormattedTextFragment::plain_text(
                 "Use your own API keys from model providers for Warp Agent. You can also add custom endpoints to use third-party models. Custom endpoints must support the OpenAI-compatible Chat Completions API. API keys are stored locally and are never synced to the cloud. Using auto models or models from providers you have not provided API keys for will consume Warp credits. ",
             ),
-            FormattedTextFragment::hyperlink(
-                "Learn more",
-                CUSTOM_INFERENCE_LEARN_MORE_URL,
-            ),
+            FormattedTextFragment::hyperlink("Learn more", CUSTOM_INFERENCE_LEARN_MORE_URL),
         ];
         let description = FormattedTextElement::new(
             FormattedText::new([FormattedTextLine::Line(text_fragments)]),
@@ -7092,10 +7089,7 @@ impl ApiKeysWidget {
             FormattedTextFragment::plain_text(
                 "By using BYOK or custom endpoints, you agree to use them only as permitted by ",
             ),
-            FormattedTextFragment::hyperlink(
-                "Warp's Terms of Service",
-                CUSTOM_INFERENCE_TERMS_URL,
-            ),
+            FormattedTextFragment::hyperlink("Warp's Terms of Service", CUSTOM_INFERENCE_TERMS_URL),
             FormattedTextFragment::plain_text(
                 ". BYOK and custom endpoints are intended for individual use and small teams. Companies or organizations with more than 10 employees should use Warp Business or Enterprise.",
             ),

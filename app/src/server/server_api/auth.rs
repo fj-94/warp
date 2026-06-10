@@ -1,9 +1,8 @@
 use std::{result::Result as StdResult, sync::Arc};
 
-use anyhow::{Context as _, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context as _, Result};
 use async_trait::async_trait;
 use cynic::{MutationBuilder, QueryBuilder};
-use firebase::{FetchAccessTokenResponse, FirebaseError};
 use futures::FutureExt;
 use instant::Duration;
 #[cfg(test)]
@@ -45,10 +44,11 @@ use warp_graphql::queries::get_user_settings::{GetUserSettings, GetUserSettingsV
 use warpui::r#async::BoxFuture;
 
 use crate::auth::UserUid;
+use crate::firebase::{FetchAccessTokenResponse, FirebaseError};
 use crate::server::graphql::{default_request_options, get_user_facing_error_message};
 use crate::server::ids::ApiKeyUid;
-use crate::server::server_api::EXPERIMENT_ID_HEADER;
 use crate::server::server_api::register_error;
+use crate::server::server_api::EXPERIMENT_ID_HEADER;
 use crate::settings::PrivacySettingsSnapshot;
 use crate::{
     auth::{
@@ -166,7 +166,7 @@ pub trait AuthClient: 'static + Send + Sync {
 
     /// Queries warp-server for a set of the currently logged-in user's fields.
     async fn fetch_user_properties<'a>(&self, auth_token: Option<&'a str>)
-    -> Result<GqlUserOutput>;
+        -> Result<GqlUserOutput>;
 
     /// Upon success, returns an `Option` containing the user's settings retrieved from the server,
     /// if any. The user may not have server-side settings if they onboarded prior to the launch

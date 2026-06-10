@@ -6,7 +6,9 @@ use warpui::ModelSpawner;
 use super::terminal::TerminalDriver;
 use crate::ai::cloud_environments::ProvidersConfig;
 
+#[cfg(feature = "aws_bedrock")]
 mod aws;
+#[cfg(feature = "warp_managed_secrets")]
 mod gcp;
 
 pub(crate) type Result<T> = std::result::Result<T, CloudProviderSetupError>;
@@ -55,15 +57,24 @@ pub(crate) fn load_providers(
     providers: &ProvidersConfig,
     run_id: &str,
 ) -> Result<Vec<Box<dyn CloudProvider>>> {
+    #[cfg(not(any(feature = "aws_bedrock", feature = "warp_managed_secrets")))]
+    let _ = run_id;
+    #[allow(unused_mut)]
     let mut result: Vec<Box<dyn CloudProvider>> = Vec::new();
 
+    #[cfg(feature = "aws_bedrock")]
     if let Some(aws) = &providers.aws {
         result.push(Box::new(aws::AwsCloudProvider::new(aws, run_id)?));
     }
+    #[cfg(not(feature = "aws_bedrock"))]
+    let _ = &providers.aws;
 
+    #[cfg(feature = "warp_managed_secrets")]
     if let Some(gcp) = &providers.gcp {
         result.push(Box::new(gcp::GcpCloudProvider::new(gcp, run_id)?));
     }
+    #[cfg(not(feature = "warp_managed_secrets"))]
+    let _ = &providers.gcp;
 
     Ok(result)
 }

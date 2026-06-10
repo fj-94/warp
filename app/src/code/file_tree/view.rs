@@ -65,6 +65,7 @@ use crate::{
     view_components::DismissibleToast,
     workspace::ToastStack,
 };
+#[cfg(feature = "remote_server_support")]
 use warp_core::features::FeatureFlag;
 use warp_core::ui::theme::{color::internal_colors, Fill};
 use warp_core::HostId;
@@ -1444,7 +1445,7 @@ impl FileTreeView {
     /// an unloaded subdirectory. The response flows back through
     /// `RepoMetadataEvent::FileTreeEntryUpdated { Remote }` which rebuilds
     /// the view automatically.
-    #[cfg(feature = "local_fs")]
+    #[cfg(all(feature = "local_fs", feature = "remote_server_support"))]
     fn load_remote_directory(
         &self,
         root_path: &StandardizedPath,
@@ -1482,6 +1483,15 @@ impl FileTreeView {
         RemoteServerManager::handle(ctx).update(ctx, |mgr, ctx| {
             mgr.load_remote_repo_metadata_directory(session_id, repo_root, dir_path, ctx);
         });
+    }
+
+    #[cfg(all(feature = "local_fs", not(feature = "remote_server_support")))]
+    fn load_remote_directory(
+        &self,
+        _root_path: &StandardizedPath,
+        _target_item: &FileTreeEntryState,
+        _ctx: &mut ViewContext<Self>,
+    ) {
     }
 
     #[cfg(not(feature = "local_fs"))]

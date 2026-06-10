@@ -12,7 +12,9 @@ use async_channel::Receiver;
 use instant::Instant;
 use std::sync::Arc;
 
+#[cfg(feature = "remote_server_support")]
 use crate::remote_server::manager::RemoteServerManager;
+#[cfg(feature = "remote_server_support")]
 use warpui::SingletonEntity;
 use warpui::{Entity, ModelContext, ModelHandle};
 
@@ -30,6 +32,7 @@ use super::{
         terminal_model::{CommandType, HandlerEvent},
     },
 };
+#[cfg(feature = "remote_server_support")]
 use crate::features::FeatureFlag;
 use crate::terminal::shell::ShellType;
 use crate::{send_telemetry_from_ctx, TelemetryEvent};
@@ -89,7 +92,17 @@ impl ModelEventDispatcher {
                     pending_session_info.is_legacy_ssh_session,
                     IsLegacySSHSession::Yes { .. }
                 );
-                if FeatureFlag::SshRemoteServer.is_enabled() && is_legacy_ssh {
+                let use_remote_server = {
+                    #[cfg(feature = "remote_server_support")]
+                    {
+                        FeatureFlag::SshRemoteServer.is_enabled() && is_legacy_ssh
+                    }
+                    #[cfg(not(feature = "remote_server_support"))]
+                    {
+                        false
+                    }
+                };
+                if use_remote_server {
                     ModelEvent::SshInitShell {
                         pending_session_info,
                     }
@@ -345,6 +358,7 @@ impl ModelEventDispatcher {
         // `SessionsEvent::SessionBootstrapped`, which causes subscribers to
         // immediately queue `RunCommand` requests (e.g. `load_external_commands`).
         // The daemon must have the executor ready before those requests arrive.
+        #[cfg(feature = "remote_server_support")]
         if FeatureFlag::SshRemoteServer.is_enabled() && is_legacy_ssh {
             RemoteServerManager::handle(ctx).update(ctx, |mgr, _ctx| {
                 mgr.notify_session_bootstrapped(

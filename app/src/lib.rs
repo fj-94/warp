@@ -37,6 +37,15 @@ mod dynamic_libraries;
 mod env_vars;
 mod experiments;
 mod external_secrets;
+#[cfg(feature = "firebase_auth")]
+extern crate firebase as firebase_crate;
+#[cfg(feature = "firebase_auth")]
+mod firebase {
+    pub use crate::firebase_crate::*;
+}
+#[cfg(not(feature = "firebase_auth"))]
+#[path = "firebase_disabled.rs"]
+mod firebase;
 #[cfg(target_family = "wasm")]
 mod font_fallback;
 mod global_resource_handles;
@@ -65,7 +74,17 @@ mod projects;
 mod prompt;
 mod quit_warning;
 mod referral_theme_status;
+#[cfg(feature = "warp_managed_secrets")]
+extern crate warp_managed_secrets as warp_managed_secrets_crate;
+#[cfg(feature = "warp_managed_secrets")]
+mod warp_managed_secrets {
+    pub use crate::warp_managed_secrets_crate::*;
+}
+#[cfg(feature = "remote_server_support")]
 #[allow(dead_code)]
+mod remote_server;
+#[cfg(not(feature = "remote_server_support"))]
+#[path = "remote_server/disabled.rs"]
 mod remote_server;
 mod resource_limits;
 mod reward_view;
@@ -92,6 +111,9 @@ mod vim_registers;
 mod voice;
 mod voltron;
 mod warp_managed_paths_watcher;
+#[cfg(not(feature = "warp_managed_secrets"))]
+#[path = "managed_secrets_disabled.rs"]
+mod warp_managed_secrets;
 #[cfg(target_family = "wasm")]
 mod wasm_nux_dialog;
 mod window_settings;
@@ -250,6 +272,7 @@ use crate::undo_close::UndoCloseStack;
 use crate::user_config::WarpConfig;
 use crate::vim_registers::VimRegisters;
 use crate::warp_managed_paths_watcher::{ensure_warp_watch_roots_exist, WarpManagedPathsWatcher};
+use crate::warp_managed_secrets::ManagedSecretManager;
 use crate::workflows::aliases::WorkflowAliases;
 use crate::workflows::local_workflows::LocalWorkflows;
 use crate::workspace::{ActiveSession, OneTimeModalModel, ToastStack};
@@ -266,19 +289,18 @@ use referral_theme_status::ReferralThemeStatus;
 use rust_embed::RustEmbed;
 use server::server_api::ServerApiProvider;
 use settings::{ExtraMetaKeys, PrivacySettings};
-#[cfg(feature = "local_fs")]
+#[cfg(all(feature = "local_fs", feature = "remote_server_support"))]
 use shellexpand::tilde;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ops::Deref;
-#[cfg(feature = "local_fs")]
+#[cfg(all(feature = "local_fs", feature = "remote_server_support"))]
 use std::path::PathBuf;
 use std::sync::Arc;
 use terminal::input;
 use terminal::session_settings::SessionSettings;
 use url::Url;
 use warp_core::execution_mode::{AppExecutionMode, ExecutionMode};
-use warp_managed_secrets::ManagedSecretManager;
 use workspace::sync_inputs::SyncedInputState;
 
 use warpui::{integration::TestDriver, App, AssetProvider, Event};
@@ -288,6 +310,7 @@ use crate::app_state::AppState;
 use crate::cloud_object::model::actions::ObjectAction;
 use crate::cloud_object::model::persistence::CloudModel;
 use crate::drive::CloudObjectTypeAndId;
+#[cfg(feature = "use_tantivy_search")]
 use crate::experiments::ImprovedPaletteSearch;
 pub use crate::global_resource_handles::{GlobalResourceHandles, GlobalResourceHandlesProvider};
 use crate::notification::NotificationContext;
@@ -330,6 +353,9 @@ use warpui::{AppContext, SingletonEntity, WindowId};
 // embedded asset set to keep the CLI binary small — mirroring the carve-out
 // already applied for the WASM target above.
 #[cfg_attr(feature = "standalone", exclude = "async/**")]
+// Offline OSS keeps local terminal/agent behavior and avoids the cloud-facing
+// onboarding, billing, and launch-modal artwork that dominates async PNG size.
+#[cfg_attr(feature = "offline_oss", exclude = "async/png/**")]
 pub struct Assets;
 
 pub static ASSETS: Assets = Assets;
@@ -357,6 +383,7 @@ fn determine_agent_source(
 #[cfg(feature = "local_fs")]
 fn daemon_codebase_index_snapshot_storage(launch_mode: &LaunchMode) -> Option<SnapshotStorage> {
     match launch_mode {
+        #[cfg(feature = "remote_server_support")]
         LaunchMode::RemoteServerDaemon { identity_key } => {
             let data_dir = remote_server::setup::remote_server_daemon_data_dir(identity_key);
             let snapshot_dir = PathBuf::from(tilde(&data_dir).into_owned())
@@ -364,6 +391,8 @@ fn daemon_codebase_index_snapshot_storage(launch_mode: &LaunchMode) -> Option<Sn
                 .join("codebase_index_snapshots");
             SnapshotStorage::from_dir(snapshot_dir)
         }
+        #[cfg(not(feature = "remote_server_support"))]
+        LaunchMode::RemoteServerDaemon { .. } => None,
         LaunchMode::App { .. }
         | LaunchMode::CommandLine { .. }
         | LaunchMode::RemoteServerProxy
@@ -671,7 +700,7 @@ pub fn run() -> Result<()> {
                     }
                 }
             }
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
             warp_cli::Command::Worker(warp_cli::WorkerCommand::RemoteServerProxy(args)) => {
                 // Proxy is a thin byte bridge (stdin/stdout ↔ Unix socket).
                 // It only needs logging to stderr since stdout is the protocol
@@ -683,11 +712,18 @@ pub fn run() -> Result<()> {
                 })?;
                 return crate::remote_server::run_proxy(args.identity_key.clone());
             }
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
             warp_cli::Command::Worker(warp_cli::WorkerCommand::RemoteServerDaemon(args)) => {
                 // Daemon handles its own full initialization (including
                 // initialize_app and crash reporting) inside run_daemon_app.
                 return crate::remote_server::run_daemon(args.identity_key.clone());
+            }
+            #[cfg(all(not(target_family = "wasm"), not(feature = "remote_server_support")))]
+            warp_cli::Command::Worker(
+                warp_cli::WorkerCommand::RemoteServerProxy(_)
+                | warp_cli::WorkerCommand::RemoteServerDaemon(_),
+            ) => {
+                anyhow::bail!("remote server workers are not available in this build");
             }
             #[cfg(not(target_family = "wasm"))]
             warp_cli::Command::Worker(warp_cli::WorkerCommand::RipgrepSearch {
@@ -1072,6 +1108,7 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
             pre_sentry_errors,
         );
 
+        #[cfg(feature = "use_tantivy_search")]
         if ImprovedPaletteSearch::improved_search_enabled(ctx) {
             FeatureFlag::UseTantivySearch.set_enabled(true);
         }
@@ -1408,11 +1445,14 @@ pub(crate) fn initialize_app(
 
     ctx.add_singleton_model(|_ctx| SyncedInputState::new());
 
-    ctx.add_singleton_model(remote_server::manager::RemoteServerManager::new);
-    #[cfg(not(target_family = "wasm"))]
-    ctx.add_singleton_model(remote_server::codebase_index_model::RemoteCodebaseIndexModel::new);
-    #[cfg(not(target_family = "wasm"))]
-    remote_server::wire_auth_token_rotation(ctx);
+    #[cfg(feature = "remote_server_support")]
+    {
+        ctx.add_singleton_model(remote_server::manager::RemoteServerManager::new);
+        #[cfg(not(target_family = "wasm"))]
+        ctx.add_singleton_model(remote_server::codebase_index_model::RemoteCodebaseIndexModel::new);
+        #[cfg(not(target_family = "wasm"))]
+        remote_server::wire_auth_token_rotation(ctx);
+    }
 
     log::info!(
         "Starting warp with channel state {} and version {:?}",
@@ -1529,7 +1569,8 @@ pub(crate) fn initialize_app(
             });
         }
 
-        let emit_incremental_updates = matches!(launch_mode, LaunchMode::RemoteServerDaemon { .. });
+        let emit_incremental_updates = cfg!(feature = "remote_server_support")
+            && matches!(launch_mode, LaunchMode::RemoteServerDaemon { .. });
         ctx.add_singleton_model(|ctx| {
             let model = if emit_incremental_updates {
                 RepoMetadataModel::new_with_incremental_updates(ctx)
@@ -1540,6 +1581,7 @@ pub(crate) fn initialize_app(
             // Subscribe to RemoteServerManager push events so that remote repo
             // metadata snapshots and incremental updates populate the remote
             // sub-model and trigger RepoMetadataEvent emissions.
+            #[cfg(feature = "remote_server_support")]
             {
                 use remote_server::manager::{RemoteServerManager, RemoteServerManagerEvent};
                 let mgr = RemoteServerManager::handle(ctx);
@@ -1952,7 +1994,8 @@ pub(crate) fn initialize_app(
 
     ctx.add_singleton_model(|ctx| {
         let should_restore_indices = launch_mode.supports_indexing()
-            && (matches!(launch_mode, LaunchMode::RemoteServerDaemon { .. })
+            && ((cfg!(feature = "remote_server_support")
+                && matches!(launch_mode, LaunchMode::RemoteServerDaemon { .. }))
                 || UserWorkspaces::as_ref(ctx).is_codebase_context_enabled(ctx));
         let indices_to_restore = if should_restore_indices {
             persisted_workspaces.clone()
@@ -2533,11 +2576,11 @@ fn launch(ctx: &mut warpui::AppContext, app_state: Option<AppState>, launch_mode
         // Daemon: bind the Unix socket and register the ServerModel.
         // initialize_app already set up everything else including crash
         // reporting.
-        #[cfg(unix)]
+        #[cfg(all(unix, feature = "remote_server_support"))]
         LaunchMode::RemoteServerDaemon { identity_key } => {
             remote_server::unix::launch_daemon(&identity_key, ctx);
         }
-        #[cfg(not(unix))]
+        #[cfg(any(not(unix), not(feature = "remote_server_support")))]
         LaunchMode::RemoteServerDaemon { .. } => {
             log::error!("RemoteServerDaemon is not supported on this platform");
             std::process::exit(1);
@@ -2581,7 +2624,7 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         flags.extend(features::RELEASE_FLAGS);
     }
 
-    flags.extend([
+    let compiled_flags: &[FeatureFlag] = &[
         #[cfg(feature = "autoupdate")]
         FeatureFlag::Autoupdate,
         #[cfg(feature = "changelog")]
@@ -3046,7 +3089,8 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::GitCredentialRefresh,
         #[cfg(feature = "remote_code_review")]
         FeatureFlag::RemoteCodeReview,
-    ]);
+    ];
+    flags.extend(compiled_flags.iter().copied());
 
     flags
 }

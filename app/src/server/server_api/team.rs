@@ -3,7 +3,7 @@ use crate::auth::UserUid;
 use crate::cloud_object::CloudObjectEventEntrypoint;
 use crate::workspaces::team::{DiscoverableTeam, MembershipRole};
 use crate::workspaces::workspace::Workspace;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use cynic::{MutationBuilder, QueryBuilder};
 use warp_graphql::mutations::add_invite_link_domain_restriction::{
@@ -137,7 +137,7 @@ pub trait TeamClient: 'static + Send + Sync {
     ) -> Result<WorkspacesMetadataWithPricing>;
 
     async fn reset_invite_links(&self, team_uid: ServerId)
-    -> Result<WorkspacesMetadataWithPricing>;
+        -> Result<WorkspacesMetadataWithPricing>;
 
     async fn set_is_invite_link_enabled(
         &self,

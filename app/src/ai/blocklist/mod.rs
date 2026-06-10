@@ -30,7 +30,10 @@ pub(crate) mod codebase_index_speedbump_banner;
 pub(crate) mod telemetry_banner;
 pub(super) mod view_util;
 
-#[cfg_attr(target_family = "wasm", allow(unused_imports))]
+#[cfg_attr(
+    any(target_family = "wasm", not(feature = "remote_server_support")),
+    allow(unused_imports)
+)]
 pub(crate) use action_model::{
     apply_edits, read_local_file_context, BlocklistAIActionEvent, BlocklistAIActionModel,
     FileReadResult, ReadFileContextResult, RequestFileEditsFormatKind, ShellCommandExecutor,

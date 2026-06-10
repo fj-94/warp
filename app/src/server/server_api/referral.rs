@@ -1,6 +1,6 @@
 use super::ServerApi;
 use crate::server::graphql::{get_request_context, get_user_facing_error_message};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use cynic::{MutationBuilder, QueryBuilder};
 #[cfg(test)]

@@ -97,8 +97,11 @@ use crate::terminal::shared_session::{
 use crate::terminal::view::Event as TerminalViewEvent;
 use crate::terminal::writeable_pty::pty_controller::{EventLoopSendError, EventLoopSender};
 use crate::terminal::writeable_pty::terminal_manager_util::{
-    init_pty_controller_model, init_remote_server_controller, wire_up_pty_controller_with_view,
-    wire_up_remote_server_controller_with_view,
+    init_pty_controller_model, wire_up_pty_controller_with_view,
+};
+#[cfg(feature = "remote_server_support")]
+use crate::terminal::writeable_pty::terminal_manager_util::{
+    init_remote_server_controller, wire_up_remote_server_controller_with_view,
 };
 use crate::terminal::writeable_pty::{self, Message};
 use crate::terminal::{
@@ -124,6 +127,7 @@ use {
 };
 
 type PtyController = writeable_pty::PtyController<mio_channel::Sender<Message>>;
+#[cfg(feature = "remote_server_support")]
 type RemoteServerController =
     writeable_pty::remote_server_controller::RemoteServerController<mio_channel::Sender<Message>>;
 
@@ -167,6 +171,7 @@ pub struct TerminalManager {
 
     /// The manager is responsible for managing the lifetime of the remote server controller.
     #[expect(dead_code)]
+    #[cfg(feature = "remote_server_support")]
     remote_server_controller: ModelHandle<RemoteServerController>,
 
     /// The process ID of the PTY. Purely used for integration tests. None if the PTY has not yet
@@ -363,6 +368,7 @@ impl TerminalManager {
         );
 
         // Initialize the RemoteServerController.
+        #[cfg(feature = "remote_server_support")]
         let remote_server_controller =
             init_remote_server_controller(&pty_controller, &model_events, ctx);
 
@@ -474,6 +480,7 @@ impl TerminalManager {
             ctx,
         );
 
+        #[cfg(feature = "remote_server_support")]
         wire_up_remote_server_controller_with_view(&remote_server_controller, &view, ctx);
 
         let session_sharer_clone = session_sharer.clone();
@@ -780,6 +787,7 @@ impl TerminalManager {
             #[cfg(unix)]
             terminal_attributes_poller: None,
             pty_controller,
+            #[cfg(feature = "remote_server_support")]
             remote_server_controller,
 
             #[cfg(feature = "integration_tests")]

@@ -144,12 +144,21 @@ impl InlineDiffView {
                     file_model.register_file_path(&local_path, false, ctx)
                 })
             }
+            #[cfg(feature = "remote_server_support")]
             DiffSessionType::Remote(host_id) => {
                 let host_id = host_id.clone();
                 let remote_path = file_path.clone();
                 file_model.update(ctx, |file_model, _ctx| {
                     file_model.register_remote_file(host_id, remote_path)
                 })
+            }
+            #[cfg(not(feature = "remote_server_support"))]
+            DiffSessionType::Remote(_) => {
+                crate::safe_error!(
+                    safe: ("Remote inline diffs are not available in this build"),
+                    full: ("Remote inline diff requested without remote_server_support")
+                );
+                return;
             }
         };
 

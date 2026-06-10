@@ -28,15 +28,15 @@ use warp_completer::completer::{
 };
 use warpui::{platform::OperatingSystem, Entity, ModelContext, SingletonEntity};
 
-#[cfg(feature = "local_tty")]
+#[cfg(all(feature = "local_tty", feature = "remote_server_support"))]
 use crate::features::FeatureFlag;
-#[cfg(feature = "local_tty")]
+#[cfg(all(feature = "local_tty", feature = "remote_server_support"))]
 use crate::remote_server::manager::{RemoteServerManager, RemoteServerManagerEvent};
 use crate::server::telemetry::{BootstrappingInfo, TelemetryEvent};
 use crate::terminal::event::ExecutedExecutorCommandEvent;
 use crate::terminal::ShellHost;
 use crate::terminal::ShellLaunchData;
-#[cfg(feature = "local_tty")]
+#[cfg(all(feature = "local_tty", feature = "remote_server_support"))]
 use command_executor::remote_server_executor::RemoteServerCommandExecutor;
 use parking_lot::{Mutex, RwLock};
 
@@ -142,7 +142,7 @@ impl Sessions {
         // client itself is baked in at session construction time
         // (see `new_command_executor_for_local_tty_session`) so we no
         // longer need to wire it here on connect/disconnect.
-        #[cfg(feature = "local_tty")]
+        #[cfg(all(feature = "local_tty", feature = "remote_server_support"))]
         if FeatureFlag::SshRemoteServer.is_enabled() {
             let mgr = RemoteServerManager::handle(ctx);
             ctx.subscribe_to_model(&mgr, |sessions, event, ctx| match event {
@@ -203,7 +203,7 @@ impl Sessions {
                 }
             });
         }
-        #[cfg(not(feature = "local_tty"))]
+        #[cfg(not(all(feature = "local_tty", feature = "remote_server_support")))]
         let _ = ctx;
 
         Self {
@@ -362,7 +362,7 @@ impl Sessions {
         // waiting for the next SessionConnected event. The
         // RemoteServerCommandExecutor already has its client baked in, so
         // nothing else needs to be wired here.
-        #[cfg(feature = "local_tty")]
+        #[cfg(all(feature = "local_tty", feature = "remote_server_support"))]
         if FeatureFlag::SshRemoteServer.is_enabled()
             && matches!(
                 session_info.session_type,

@@ -23,7 +23,53 @@ use super::model::block::BlockId;
 use super::model::session::{SessionId, SessionInfo};
 use super::model::terminal_model::{BlockIndex, ExitReason, TmuxInstallationState};
 
+#[cfg(feature = "remote_server_support")]
 pub use remote_server::setup::RemoteServerSetupState;
+
+#[cfg(not(feature = "remote_server_support"))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RemoteServerSetupState {
+    Checking,
+    Installing { progress_percent: Option<u8> },
+    Updating,
+    Initializing,
+    Ready,
+    Failed { error: String },
+    Unsupported {},
+}
+
+#[cfg(not(feature = "remote_server_support"))]
+impl RemoteServerSetupState {
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready)
+    }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed { .. })
+    }
+
+    pub fn is_unsupported(&self) -> bool {
+        matches!(self, Self::Unsupported { .. })
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        self.is_ready() || self.is_failed() || self.is_unsupported()
+    }
+
+    pub fn is_in_progress(&self) -> bool {
+        matches!(
+            self,
+            Self::Checking | Self::Installing { .. } | Self::Updating | Self::Initializing
+        )
+    }
+
+    pub fn is_connecting(&self) -> bool {
+        matches!(
+            self,
+            Self::Installing { .. } | Self::Updating | Self::Initializing
+        )
+    }
+}
 
 #[derive(Clone)]
 /// Events sent to the main thread by the terminal model & event loop.

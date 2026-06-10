@@ -1,11 +1,11 @@
 #[cfg(feature = "local_fs")]
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 #[cfg(not(target_family = "wasm"))]
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 #[cfg(not(target_family = "wasm"))]
-use crc::{CRC_32_ISCSI, Crc};
+use crc::{Crc, CRC_32_ISCSI};
 use std::future::Future;
 use thiserror::Error;
 

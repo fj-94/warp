@@ -1,7 +1,7 @@
+use crate::warp_managed_secrets::ManagedSecretValue;
 use anyhow::{anyhow, Result};
 use warp_cli::agent::Harness;
 use warp_graphql::managed_secrets::ManagedSecretType;
-use warp_managed_secrets::ManagedSecretValue;
 
 pub struct AuthSecretTypeField {
     pub label: &'static str,

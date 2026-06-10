@@ -21,12 +21,12 @@ use crate::terminal::cli_agent_sessions::{CLIAgentSessionStatus, CLIAgentSession
 use crate::terminal::model::block::{BlockId, SerializedBlock};
 use crate::terminal::CLIAgent;
 use crate::util::path::resolve_executable;
+use crate::warp_managed_secrets::ManagedSecretValue;
 use warp_cli::{
     OZ_CLI_ENV, OZ_HARNESS_ENV, OZ_PARENT_RUN_ID_ENV, OZ_RUN_ID_ENV, SERVER_ROOT_URL_OVERRIDE_ENV,
     SESSION_SHARING_SERVER_URL_OVERRIDE_ENV, WS_SERVER_URL_OVERRIDE_ENV,
 };
 use warp_core::channel::ChannelState;
-use warp_managed_secrets::ManagedSecretValue;
 
 use super::terminal::{CommandHandle, TerminalDriver};
 use super::{

@@ -105,7 +105,7 @@ enclose = "1.1.8"
 enum-iterator.workspace = true
 event-listener.workspace = true
 field_mask.workspace = true
-firebase.workspace = true
+firebase = { workspace = true, optional = true }
 flate2 = "1.0.17"
 float-cmp.workspace = true
 futures-lite.workspace = true
@@ -249,13 +249,13 @@ typed-path.workspace = true
 urlencoding = "2.1.3"
 mime_guess = "2.0"
 warp_multi_agent_api.workspace = true
-remote_server.workspace = true
+remote_server = { workspace = true, optional = true }
 repo_metadata.workspace = true
 vim.workspace = true
 rmcp = { workspace = true, features = ["client"] }
 warp_isolation_platform.workspace = true
 warp_ripgrep.workspace = true
-warp_managed_secrets.workspace = true
+warp_managed_secrets = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block.workspace = true
@@ -292,10 +292,10 @@ tokio.workspace = true
 tokio-util.workspace = true
 
 # AWS SDK (loading credentials for BYO LLM)
-aws-config = { version = "1.8.16", features = ["credentials-login"] }
-aws-credential-types = "1"
-aws-sdk-sts = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
-aws-types = "1"
+aws-config = { version = "1.8.16", features = ["credentials-login"], optional = true }
+aws-credential-types = { version = "1", optional = true }
+aws-sdk-sts = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"], optional = true }
+aws-types = { version = "1", optional = true }
 
 mcp.workspace = true
 rmcp = { workspace = true, features = [
@@ -308,12 +308,12 @@ rquickjs = { workspace = true, optional = true }
 rustls.workspace = true
 syntect = "5.0"
 sysinfo.workspace = true
-warp-command-signatures = { workspace = true, features = ["embed-signatures"] }
+warp-command-signatures = { workspace = true }
 is_executable = "1.0.1"
 gethostname = "1.1.0"
 watcher.workspace = true
-warp_files.workspace = true
-tantivy = "0.26.0"
+warp_files = { workspace = true, default-features = false }
+tantivy = { version = "0.26.0", optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 console_error_panic_hook = { version = "0.1.6" }
@@ -559,7 +559,10 @@ default = [
     "ambient_agents_command_line",
     "ambient_agents_image_upload",
     "scheduled_ambient_agents",
+    "embedded_command_signatures",
+    "firebase_auth",
     "warp_managed_secrets",
+    "aws_bedrock",
     "v4a_file_diffs",
     "classic_completions",
     "force_classic_completions",
@@ -646,6 +649,70 @@ default = [
     "cloud_mode_input_v2",
     "cloud_mode_setup_v2",
     "handoff_cloud_cloud",
+    "remote_server_support",
+]
+offline_oss = [
+    "agent_mode",
+    "agent_view",
+    "agent_view_block_context",
+    "agent_view_conversation_list_view",
+    "agent_view_prompt_chip",
+    "agent_toolbar_editor",
+    "allow_ignoring_input_suggestions",
+    "allow_opening_file_links_using_editor_env",
+    "api_key_management",
+    "ask_user_question",
+    "classic_completions",
+    "cli_agent_rich_input",
+    "code_find_replace",
+    "code_review_find",
+    "code_review_save_changes",
+    "command_palette_file_search",
+    "configurable_context_window",
+    "configurable_toolbar",
+    "diff_set_as_context",
+    "directory_tab_colors",
+    "external_agent_mode_context",
+    "file_based_mcp",
+    "file_retrieval_tools",
+    "file_tree",
+    "force_classic_completions",
+    "full_screen_zen_mode",
+    "grep_tool",
+    "inline_history_menu",
+    "inline_model_selector",
+    "inline_profile_selector",
+    "inline_repo_menu",
+    "inline_slash_commands",
+    "linked_code_blocks",
+    "list_skills",
+    "local_claude_codex_child_harnesses",
+    "local_fs",
+    "local_tty",
+    "markdown_tables",
+    "mcp_grouped_server_context",
+    "mcp_server",
+    "minimalist_ui",
+    "multi_profile",
+    "profiles_design_revamp",
+    "rect_selection",
+    "render_agent_mode_output_markdown",
+    "render_continuous_block_selections_with_single_border",
+    "revert_diff_hunk",
+    "settings_file",
+    "shell_selector",
+    "skill_arguments",
+    "skip_firebase_anonymous_user",
+    "solo_user_byok",
+    "tab_close_button_on_left",
+    "tab_configs",
+    "tabbed_editor_view",
+    "trim_trailing_blank_lines",
+    "ui_zoom",
+    "undo_closed_panes",
+    "vertical_tabs",
+    "vertical_tabs_summary_mode",
+    "vim_code_editor",
 ]
 # Enable this feature to automatically perform heap profiling.  NOTE: This will
 # substantially slow down program execution.
@@ -655,6 +722,10 @@ editable_markdown_mermaid = []
 default_adeberry_theme = []
 drag_tabs_to_windows = []
 embedded_code_review_comments = []
+embedded_command_signatures = [
+    "warp-command-signatures/embed-signatures",
+    "warp_completer/embedded_command_signatures",
+]
 agent_management_view = []
 agent_management_details_view = []
 interactive_conversation_management_view = []
@@ -680,6 +751,14 @@ nld_classifier_v1 = ["input_classifier/nld_classifier_v1"]
 nld_classifier_v2 = ["input_classifier/nld_classifier_v2"]
 nld_heuristic_v1 = ["input_classifier/nld_heuristic_v1"]
 nld_heuristic_v2 = ["input_classifier/nld_heuristic_v2"]
+aws_bedrock = [
+    "dep:aws-config",
+    "dep:aws-credential-types",
+    "dep:aws-sdk-sts",
+    "dep:aws-types",
+    "warp_managed_secrets",
+]
+firebase_auth = ["dep:firebase"]
 msys2_shells = []
 file_retrieval_tools = []
 welcome_tab = []
@@ -747,7 +826,8 @@ notebook_parameter = []
 oz_changelog_updates = []
 personal_cloud_objects = []
 # Remote-backed tty that connects to a PTY-like interface via a server.
-remote_tty = []
+remote_server_support = ["dep:remote_server", "warp_files/remote_server_support"]
+remote_tty = ["remote_server_support"]
 # Fix for cursor reflow bug during window resize, from Alacritty resizing logic.
 resize_fix = []
 pluggable_notifications = []
@@ -828,7 +908,7 @@ warp_packs = []
 suggested_rules = []
 command_correction_key = []
 full_source_code_embedding = []
-use_tantivy_search = []
+use_tantivy_search = ["dep:tantivy"]
 agent_management_popup = []
 simulate_github_unauthed = []
 reload_stale_conversation_files = []
@@ -896,7 +976,7 @@ revert_to_checkpoints = []
 rewind_slash_command = []
 agent_view = []
 agent_view_block_context = ["agent_view"]
-warp_managed_secrets = []
+warp_managed_secrets = ["dep:warp_managed_secrets"]
 v4a_file_diffs = []
 agent_tips = []
 agent_toolbar_editor = ["agent_view"]
@@ -967,7 +1047,7 @@ identifier = "dev.warp.WarpOss"
 name = "WarpOss"
 resources = ["assets/onboarding"]
 icon = ["channels/oss/icon/no-padding/512x512.png", "channels/oss/icon/no-padding/icon.ico"]
-short_description = "The open-source, cloud-backed terminal for individuals and teams."
+short_description = "The open-source, offline-capable terminal for local development."
 
 [package.metadata.bundle.bin.stable]
 category = "public.app-category.developer-tools"

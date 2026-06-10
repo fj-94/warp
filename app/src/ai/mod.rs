@@ -14,7 +14,10 @@ pub(crate) mod artifact_download;
 pub mod artifacts;
 pub(crate) mod attachment_utils;
 pub mod auth_secret_types;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(not(target_family = "wasm"), feature = "aws_bedrock"))]
+pub mod aws_credentials;
+#[cfg(all(not(target_family = "wasm"), not(feature = "aws_bedrock")))]
+#[path = "aws_credentials_disabled.rs"]
 pub mod aws_credentials;
 pub(crate) mod block_context;
 pub(crate) mod blocklist;

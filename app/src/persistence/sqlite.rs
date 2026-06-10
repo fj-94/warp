@@ -450,9 +450,17 @@ fn app_database_file_path() -> PathBuf {
 }
 
 fn remote_server_daemon_database_file_path(identity_key: &str) -> PathBuf {
-    let data_dir = remote_server::setup::remote_server_daemon_data_dir(identity_key);
-    let expanded_data_dir = shellexpand::tilde(&data_dir).into_owned();
-    PathBuf::from(expanded_data_dir).join(WARP_SQLITE_FILE_NAME)
+    #[cfg(feature = "remote_server_support")]
+    {
+        let data_dir = remote_server::setup::remote_server_daemon_data_dir(identity_key);
+        let expanded_data_dir = shellexpand::tilde(&data_dir).into_owned();
+        PathBuf::from(expanded_data_dir).join(WARP_SQLITE_FILE_NAME)
+    }
+    #[cfg(not(feature = "remote_server_support"))]
+    {
+        let _ = identity_key;
+        app_database_file_path()
+    }
 }
 
 #[cfg(unix)]

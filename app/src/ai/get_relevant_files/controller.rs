@@ -17,7 +17,7 @@ use warp_core::features::FeatureFlag;
 
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
 use crate::ai::agent::SearchCodebaseFailureReason;
 use crate::{
     ai::{
@@ -30,8 +30,14 @@ use crate::{
     server::server_api::{AIApiError, ServerApiProvider},
     TelemetryEvent,
 };
-#[cfg_attr(not(target_family = "wasm"), path = "remote_search/native.rs")]
-#[cfg_attr(target_family = "wasm", path = "remote_search/wasm.rs")]
+#[cfg_attr(
+    all(not(target_family = "wasm"), feature = "remote_server_support"),
+    path = "remote_search/native.rs"
+)]
+#[cfg_attr(
+    any(target_family = "wasm", not(feature = "remote_server_support")),
+    path = "remote_search/wasm.rs"
+)]
 mod remote_search;
 
 #[derive(Debug)]
@@ -368,7 +374,7 @@ impl GetRelevantFilesController {
             action_id.clone(),
             ctx,
         ) {
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
             remote_search::RemoteSearchRequest::Pending(abort_handle) => {
                 self.pending_requests
                     .insert(action_id, RequestHandle::AbortHandle(abort_handle));
@@ -406,7 +412,7 @@ impl GetRelevantFilesController {
         };
     }
 
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
     fn handle_remote_search_result(
         &mut self,
         search_result: anyhow::Result<SearchCodebaseResult>,

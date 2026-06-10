@@ -15,11 +15,9 @@ use warp_core::channel::ChannelState;
 use warp_core::{features::FeatureFlag, report_error};
 use warp_multi_agent_api::ConversationData;
 
-use super::ServerApi;
 use super::auth::AuthClient;
 use super::harness_support::{UploadField, UploadFieldValue, UploadTarget};
-#[cfg(not(feature = "agent_mode_evals"))]
-use crate::ai::BonusGrant;
+use super::ServerApi;
 use crate::ai::agent::conversation::{
     AIAgentConversationFormat, AIAgentHarness, AIAgentSerializedBlockFormat,
     ServerAIConversationMetadata,
@@ -31,6 +29,8 @@ use crate::ai::generate_code_review_content::api::{
 };
 #[cfg(feature = "agent_mode_evals")]
 use crate::ai::request_usage_model::RequestLimitInfo;
+#[cfg(not(feature = "agent_mode_evals"))]
+use crate::ai::BonusGrant;
 use crate::ai::{agent::api::ServerConversationToken, harness_availability::HarnessAvailability};
 use crate::persistence::model::ConversationUsageMetadata;
 use crate::terminal::model::block::SerializedBlock;
@@ -42,16 +42,15 @@ use crate::{
 };
 use crate::{
     ai::{
-        RequestUsageInfo,
         llms::{
             AvailableLLMs, DisableReason, LLMContextWindow, LLMInfo, LLMModelHost, LLMProvider,
             LLMSpec, LLMUsageMetadata, ModelsByFeature, RoutingHostConfig,
         },
+        RequestUsageInfo,
     },
     ai_assistant::{
-        AIGeneratedCommand, GenerateCommandsFromNaturalLanguageError,
         execution_context::WarpAiExecutionContext, requests::GenerateDialogueResult,
-        utils::TranscriptPart,
+        utils::TranscriptPart, AIGeneratedCommand, GenerateCommandsFromNaturalLanguageError,
     },
     drive::workflows::ai_assist::{GeneratedCommandMetadata, GeneratedCommandMetadataError},
     server::graphql::{
@@ -59,8 +58,9 @@ use crate::{
     },
 };
 use ai::index::full_source_code_embedding::{
-    self, CodebaseContextConfig, ContentHash, EmbeddingConfig, NodeHash, RepoMetadata,
+    self,
     store_client::{IntermediateNode, StoreClient},
+    CodebaseContextConfig, ContentHash, EmbeddingConfig, NodeHash, RepoMetadata,
 };
 use warp_graphql::client::Operation;
 #[cfg(not(feature = "agent_mode_evals"))]
@@ -153,8 +153,8 @@ use warp_graphql::{
 pub use crate::ai::agent::UserQueryMode;
 // Re-export ambient agent types for backwards compatibility
 pub use crate::ai::ambient_agents::{
-    AgentConfigSnapshot, AgentSource, AmbientAgentTask, AmbientAgentTaskState, TaskStatusMessage,
     task::{AttachmentInput, TaskAttachment},
+    AgentConfigSnapshot, AgentSource, AmbientAgentTask, AmbientAgentTaskState, TaskStatusMessage,
 };
 
 const AI_ASSISTANT_REQUEST_TIMEOUT_SECONDS: u64 = 30;

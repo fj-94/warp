@@ -114,14 +114,17 @@ impl ReadFilesExecutor {
 
         // Check if this is a remote session with a connected host.
         let session_type = self.active_session.as_ref(ctx).session_type(ctx);
+        #[cfg(feature = "remote_server_support")]
         let remote_client = match &session_type {
             Some(SessionType::WarpifiedRemote {
                 host_id: Some(host_id),
-            }) => remote_server::manager::RemoteServerManager::as_ref(ctx)
+            }) => crate::remote_server::manager::RemoteServerManager::as_ref(ctx)
                 .client_for_host(host_id)
                 .cloned(),
             _ => None,
         };
+        #[cfg(not(feature = "remote_server_support"))]
+        let remote_client: Option<()> = None;
 
         // Remote session without a usable remote server client. File reading
         // requires either local access or a connected remote server, neither
@@ -138,10 +141,11 @@ impl ReadFilesExecutor {
             ));
         }
 
+        #[cfg(feature = "remote_server_support")]
         if let Some(client) = remote_client {
             return ActionExecution::Async {
                 execute_future: Box::pin(async move {
-                    let request = remote_server::proto::ReadFileContextRequest {
+                    let request = crate::remote_server::proto::ReadFileContextRequest {
                         files: locations
                             .iter()
                             .map(|loc| {
@@ -150,12 +154,12 @@ impl ReadFilesExecutor {
                                     &shell,
                                     &current_working_directory,
                                 );
-                                remote_server::proto::ReadFileContextFile {
+                                crate::remote_server::proto::ReadFileContextFile {
                                     path: absolute_path,
                                     line_ranges: loc
                                         .lines
                                         .iter()
-                                        .map(|r| remote_server::proto::LineRange {
+                                        .map(|r| crate::remote_server::proto::LineRange {
                                             start: r.start as u32,
                                             end: r.end as u32,
                                         })
@@ -196,10 +200,10 @@ impl ReadFilesExecutor {
                         .into_iter()
                         .filter_map(|fc| {
                             let content = match fc.content? {
-                                remote_server::proto::file_context_proto::Content::TextContent(
+                                crate::remote_server::proto::file_context_proto::Content::TextContent(
                                     text,
                                 ) => crate::ai::agent::AnyFileContent::StringContent(text),
-                                remote_server::proto::file_context_proto::Content::BinaryContent(
+                                crate::remote_server::proto::file_context_proto::Content::BinaryContent(
                                     bytes,
                                 ) => crate::ai::agent::AnyFileContent::BinaryContent(bytes),
                             };

@@ -100,6 +100,7 @@ DMG_NAME_SUFFIX=""
 # By default we build dev bundles.
 RELEASE_CHANNEL="dev"
 FEATURES="release_bundle,cocoa_sentry,extern_plist"
+NO_DEFAULT_FEATURES=false
 REGISTER_SERVICES=true
 DEBUG=false
 ARTIFACT="app"
@@ -246,6 +247,8 @@ eval set -- "$PARAMS"
 # Infer a cargo profile from the bundle configuration.
 if [[ $DEBUG = true ]]; then
   CARGO_PROFILE="dev"
+elif [[ $RELEASE_CHANNEL = "oss" ]]; then
+  CARGO_PROFILE="release-oss"
 elif [[ $RELEASE_CHANNEL = "local" || $RELEASE_CHANNEL = "dev" ]]; then
   # For dev bundles, we want to enable debug assertions to
   # catch violations that would otherwise silently pass in
@@ -311,9 +314,10 @@ elif [[ $RELEASE_CHANNEL = "oss" ]]; then
     BUNDLE_ID="dev.warp.WarpOss"
     WARP_APP_NAME="WarpOss"
     WARP_SCHEME_NAME="warposs"
-    # The OSS channel does not ship Sentry, so drop the cocoa_sentry feature
-    # (which would otherwise pull in the Sentry framework dependency).
-    FEATURES="release_bundle,extern_plist"
+    # The offline OSS bundle keeps local terminal/agent features and avoids
+    # compiling the default cloud-heavy feature set.
+    FEATURES="release_bundle,offline_oss,extern_plist"
+    NO_DEFAULT_FEATURES=true
 fi
 
 OUT_DIR="target/$TARGET_PROFILE_DIR/bundle/osx"
@@ -352,12 +356,21 @@ if [[ "$ARTIFACT" == cli ]]; then
   OPEN_AFTER_BUNDLE=false
   FEATURES="$FEATURES,standalone"
 elif [[ "$ARTIFACT" == app ]]; then
-  FEATURES="$FEATURES,gui"
-  if [[ "$RELEASE_CHANNEL" == "local" || "$RELEASE_CHANNEL" == "dev" ]]; then
+  if [[ "$RELEASE_CHANNEL" != "oss" ]]; then
+    FEATURES="$FEATURES,gui"
+  fi
+  if [[ "$RELEASE_CHANNEL" == "oss" ]]; then
+    FEATURES="$FEATURES,nld_heuristic_v1"
+  elif [[ "$RELEASE_CHANNEL" == "local" || "$RELEASE_CHANNEL" == "dev" ]]; then
     FEATURES="$FEATURES,nld_classifier_v2,nld_heuristic_v2"
   else
     FEATURES="$FEATURES,nld_classifier_v1,nld_heuristic_v1"
   fi
+fi
+
+CARGO_FEATURE_ARGS=(--features "$FEATURES")
+if [[ "$NO_DEFAULT_FEATURES" == true ]]; then
+  CARGO_FEATURE_ARGS=(--no-default-features "${CARGO_FEATURE_ARGS[@]}")
 fi
 
 # If we're building a universal bundle for the app artifact, make sure the additional target is available.
@@ -369,9 +382,9 @@ fi
 # then exit.  We use this script to invoke `cargo check` to ensure that we are
 # using the same feature flags and profile that we would be using in production.
 if [[ "$CHECK_ONLY" == "true" ]]; then
-  cargo check --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --target "$DEFAULT_TARGET" --features "$FEATURES"
+  cargo check --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --target "$DEFAULT_TARGET" "${CARGO_FEATURE_ARGS[@]}"
   if [[ $UNIVERSAL_BINARY = true && "$ARTIFACT" != "cli" ]]; then
-    cargo check --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --target "$ADDITIONAL_TARGET" --features "$FEATURES"
+    cargo check --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --target "$ADDITIONAL_TARGET" "${CARGO_FEATURE_ARGS[@]}"
   fi
   exit 0
 fi
@@ -401,7 +414,7 @@ if [[ "$ARTIFACT" == "app" ]]; then
 
   pushd app > /dev/null
   echo "Building and bundling $DEFAULT_TARGET for channel $RELEASE_CHANNEL and bundle id $BUNDLE_ID with profile $CARGO_PROFILE"
-  cargo bundle --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --target "$DEFAULT_TARGET" --features "$FEATURES"
+  cargo bundle --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --target "$DEFAULT_TARGET" "${CARGO_FEATURE_ARGS[@]}"
   popd > /dev/null
 
   echo "Adding rpath to support mac frameworks (e.g. Sentry)"
@@ -470,7 +483,7 @@ if [[ "$ARTIFACT" == "app" ]]; then
           echo "Building $ADDITIONAL_TARGET to include in universal binary"
 
           pushd app > /dev/null
-          cargo build --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --target "$ADDITIONAL_TARGET" --features "$FEATURES"
+          cargo build --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --target "$ADDITIONAL_TARGET" "${CARGO_FEATURE_ARGS[@]}"
           popd > /dev/null
       else
           echo "Skipping build of $ADDITIONAL_TARGET due to --skip-build flag"
@@ -579,7 +592,7 @@ elif [[ "$ARTIFACT" == "cli" ]]; then
     export "INFO_PLIST_PATH=$(realpath "$WARP_PLIST_PATH")"
     pushd app > /dev/null
     echo "Building $DEFAULT_TARGET for channel $RELEASE_CHANNEL with profile $CARGO_PROFILE"
-    cargo build --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --target "$DEFAULT_TARGET" --features "$FEATURES"
+    cargo build --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --target "$DEFAULT_TARGET" "${CARGO_FEATURE_ARGS[@]}"
     popd > /dev/null
   else
     echo "Skipping binary build due to --skip-build flag"

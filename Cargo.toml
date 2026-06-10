@@ -75,7 +75,7 @@ warp_core = { path = "crates/warp_core" }
 warp_editor = { path = "crates/editor" }
 warp_features = { path = "crates/warp_features" }
 remote_server = { path = "crates/remote_server" }
-warp_files = { path = "crates/warp_files" }
+warp_files = { path = "crates/warp_files", default-features = false }
 warp_graphql = { path = "crates/graphql" }
 warp_graphql_schema = { path = "crates/warp_graphql_schema" }
 warp_isolation_platform = { path = "crates/isolation_platform" }
@@ -445,6 +445,19 @@ lto = "thin"
 # compiler errors. We use a shorthand to get around these issues.
 [profile.rlto]
 inherits = "release-lto"
+
+# Size-oriented profile for offline OSS app bundles. Unlike the normal LTO
+# profile, this does not retain line tables in the shipped binary.
+[profile.release-oss]
+inherits = "release-lto"
+debug = 0
+strip = "symbols"
+opt-level = "s"
+codegen-units = 1
+
+# Windows paths are sensitive to long profile names.
+[profile.ross]
+inherits = "release-oss"
 
 # A custom release-like profile that forces debug assertions on.
 [profile.release-lto-debug_assertions]

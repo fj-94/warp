@@ -364,6 +364,24 @@ impl SettingsSection {
     pub fn cloud_platform_subpages() -> &'static [Self] {
         &[Self::CloudEnvironments, Self::OzCloudAPIKeys]
     }
+
+    pub fn is_hidden_for_offline_oss(&self) -> bool {
+        cfg!(feature = "offline_oss")
+            && matches!(
+                self,
+                Self::Account
+                    | Self::BillingAndUsage
+                    | Self::CloudEnvironments
+                    | Self::CodeIndexing
+                    | Self::Knowledge
+                    | Self::OzCloudAPIKeys
+                    | Self::Privacy
+                    | Self::Referrals
+                    | Self::SharedBlocks
+                    | Self::Teams
+                    | Self::WarpDrive
+            )
+    }
 }
 
 impl FromStr for SettingsSection {
@@ -1184,38 +1202,54 @@ impl SettingsView {
 
         // Build sidebar nav items. AI page is presented as an "Agents" umbrella
         // with subpages; the actual AI SettingsPage is hidden from direct sidebar listing.
+        let ai_subpages = if cfg!(feature = "offline_oss") {
+            vec![
+                SettingsSection::WarpAgent,
+                SettingsSection::AgentProfiles,
+                SettingsSection::AgentMCPServers,
+                SettingsSection::ThirdPartyCLIAgents,
+            ]
+        } else {
+            SettingsSection::ai_subpages().to_vec()
+        };
+        let code_subpages = if cfg!(feature = "offline_oss") {
+            vec![SettingsSection::EditorAndCodeReview]
+        } else {
+            SettingsSection::code_subpages().to_vec()
+        };
+
         let mut nav_items = vec![
-            SettingsNavItem::Umbrella(SettingsUmbrella::new(
-                "Agents",
-                SettingsSection::ai_subpages().to_vec(),
-            )),
-            SettingsNavItem::Page(SettingsSection::BillingAndUsage),
-            SettingsNavItem::Umbrella(SettingsUmbrella::new(
-                "Code",
-                vec![
-                    SettingsSection::CodeIndexing,
-                    SettingsSection::EditorAndCodeReview,
-                ],
-            )),
-            SettingsNavItem::Umbrella(SettingsUmbrella::new(
-                "Cloud platform",
-                vec![
-                    SettingsSection::CloudEnvironments,
-                    SettingsSection::OzCloudAPIKeys,
-                ],
-            )),
+            SettingsNavItem::Umbrella(SettingsUmbrella::new("Agents", ai_subpages)),
+            SettingsNavItem::Umbrella(SettingsUmbrella::new("Code", code_subpages)),
             SettingsNavItem::Page(SettingsSection::Appearance),
             SettingsNavItem::Page(SettingsSection::Features),
             SettingsNavItem::Page(SettingsSection::Keybindings),
             SettingsNavItem::Page(SettingsSection::Warpify),
-            SettingsNavItem::Page(SettingsSection::SharedBlocks),
             SettingsNavItem::Page(SettingsSection::About),
         ];
+        if !cfg!(feature = "offline_oss") {
+            nav_items.insert(1, SettingsNavItem::Page(SettingsSection::BillingAndUsage));
+            nav_items.insert(
+                3,
+                SettingsNavItem::Umbrella(SettingsUmbrella::new(
+                    "Cloud platform",
+                    SettingsSection::cloud_platform_subpages().to_vec(),
+                )),
+            );
+            nav_items.insert(
+                nav_items.len() - 1,
+                SettingsNavItem::Page(SettingsSection::SharedBlocks),
+            );
+        }
 
         // Resolve the initial page: map internal backing-page sections to their default subpage.
         let initial_page = match page {
             Some(SettingsSection::AI) => SettingsSection::WarpAgent,
+            Some(SettingsSection::Code) if cfg!(feature = "offline_oss") => {
+                SettingsSection::EditorAndCodeReview
+            }
             Some(SettingsSection::Code) => SettingsSection::CodeIndexing,
+            Some(section) if section.is_hidden_for_offline_oss() => SettingsSection::Appearance,
             Some(
                 SettingsSection::Account
                 | SettingsSection::Referrals
@@ -1793,7 +1827,11 @@ impl SettingsView {
         // External callers should use subpage variants directly.
         let section = match section {
             SettingsSection::AI => SettingsSection::WarpAgent,
+            SettingsSection::Code if cfg!(feature = "offline_oss") => {
+                SettingsSection::EditorAndCodeReview
+            }
             SettingsSection::Code => SettingsSection::CodeIndexing,
+            section if section.is_hidden_for_offline_oss() => SettingsSection::Appearance,
             SettingsSection::Account
             | SettingsSection::Referrals
             | SettingsSection::Teams
