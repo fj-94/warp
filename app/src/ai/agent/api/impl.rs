@@ -185,30 +185,28 @@ fn local_custom_endpoint_for_model(params: &RequestParams) -> Option<LocalCustom
         params.computer_use_model.as_str(),
     ];
 
-    let endpoint = params
-        .custom_model_providers
-        .as_ref()?
-        .providers
-        .iter()
-        .find_map(|provider| {
+    let providers = &params.custom_model_providers.as_ref()?.providers;
+    // Local execution uses a single chat-completion model, so preserve ModelConfig priority.
+    let endpoint = selected_model_ids.iter().find_map(|selected_model_id| {
+        providers.iter().find_map(|provider| {
             provider.models.iter().find_map(|model| {
-                selected_model_ids
-                    .iter()
-                    .any(|selected_model_id| {
-                        model.config_key == *selected_model_id || model.slug == *selected_model_id
-                    })
-                    .then(|| LocalCustomEndpoint {
-                        base_url: provider.base_url.clone(),
-                        api_key: provider.api_key.clone(),
-                        model: model.slug.clone(),
-                    })
+                if model.config_key != *selected_model_id && model.slug != *selected_model_id {
+                    return None;
+                }
+
+                let endpoint = LocalCustomEndpoint {
+                    base_url: provider.base_url.clone(),
+                    api_key: provider.api_key.clone(),
+                    model: model.slug.clone(),
+                };
+
+                (!endpoint.base_url.trim().is_empty()
+                    && !endpoint.api_key.is_empty()
+                    && !endpoint.model.trim().is_empty())
+                .then_some(endpoint)
             })
         })
-        .filter(|endpoint| {
-            !endpoint.base_url.trim().is_empty()
-                && !endpoint.api_key.is_empty()
-                && !endpoint.model.trim().is_empty()
-        })?;
+    })?;
 
     log::info!(
         "Using local custom inference endpoint for model {} at {}",
@@ -890,11 +888,9 @@ fn local_continue_after_tool_result_instruction_message(
         .unwrap_or_default();
     ChatCompletionMessage {
         role: "system".to_string(),
-        content: Some(
-            format!(
-                "You received a tool result.{goal_suffix} Continue using tools until you have enough evidence to complete the user's goal. If the result is enough, provide the final answer now. Do not repeat a tool call that produced no new information."
-            ),
-        ),
+        content: Some(format!(
+            "You received a tool result.{goal_suffix} Continue using tools until you have enough evidence to complete the user's goal. If the result is enough, provide the final answer now. Do not repeat a tool call that produced no new information."
+        )),
         reasoning_content: None,
         tool_call_id: None,
         tool_calls: None,

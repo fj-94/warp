@@ -62,6 +62,24 @@ fn request_params_for_remote(host_id: Option<HostId>) -> RequestParams {
     params
 }
 
+fn custom_model_provider(
+    models: Vec<(&str, &str)>,
+) -> api::request::settings::custom_model_providers::CustomModelProvider {
+    api::request::settings::custom_model_providers::CustomModelProvider {
+        base_url: "http://localhost:11434/v1".to_string(),
+        api_key: "local-key".to_string(),
+        models: models
+            .into_iter()
+            .map(
+                |(slug, config_key)| api::request::settings::custom_model_providers::CustomModel {
+                    slug: slug.to_string(),
+                    config_key: config_key.to_string(),
+                },
+            )
+            .collect(),
+    }
+}
+
 fn local_tool_names(params: &RequestParams) -> Vec<&'static str> {
     super::local_openai_tools(params)
         .into_iter()
@@ -161,6 +179,27 @@ fn api_keys_with_warp_credit_fallback_setting_preserves_existing_keys() {
     assert_eq!(api_keys.anthropic, "anthropic-key");
     assert!(api_keys.allow_use_of_warp_credits);
 }
+
+#[test]
+fn local_custom_endpoint_prioritizes_base_model_selection() {
+    let mut params = request_params_with_ask_user_question_enabled(false);
+    params.model = "selected-base".into();
+    params.cli_agent_model = "default-cli".into();
+    params.computer_use_model = "default-computer".into();
+    params.custom_model_providers = Some(api::request::settings::CustomModelProviders {
+        providers: vec![custom_model_provider(vec![
+            ("default-cli-slug", "default-cli"),
+            ("default-computer-slug", "default-computer"),
+            ("selected-base-slug", "selected-base"),
+        ])],
+    });
+
+    let endpoint =
+        super::local_custom_endpoint_for_model(&params).expect("selected model should resolve");
+
+    assert_eq!(endpoint.model, "selected-base-slug");
+}
+
 #[test]
 fn supported_tools_omits_ask_user_question_when_disabled() {
     let params = request_params_with_ask_user_question_enabled(false);

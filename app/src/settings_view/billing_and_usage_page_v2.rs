@@ -2010,9 +2010,6 @@ impl TypedActionView for BillingAndUsagePageV2View {
             BillingAndUsagePageAction::ContactSupport => {
                 super::admin_actions::AdminActions::contact_support(ctx);
             }
-            BillingAndUsagePageAction::SignupAnonymousUser => {
-                ctx.emit(BillingAndUsagePageEvent::SignupAnonymousUser);
-            }
             BillingAndUsagePageAction::AttemptLoginGatedUpgrade => {
                 AuthManager::handle(ctx).update(ctx, |auth_manager, ctx| {
                     auth_manager.attempt_login_gated_feature(

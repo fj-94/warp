@@ -226,7 +226,6 @@ pub struct BillingAndUsagePageView {
     prorated_request_limits_info_mouse_states: Vec<MouseStateHandle>,
     // ── Plan-header mouse states ─────────────────────────────────────────
     upgrade_link: MouseStateHandle,
-    anonymous_user_sign_up_button: MouseStateHandle,
     enterprise_contact_us_link: MouseStateHandle,
     stripe_billing_portal_link: MouseStateHandle,
     admin_panel_link: MouseStateHandle,
@@ -377,7 +376,6 @@ impl BillingAndUsagePageView {
             purchase_addon_credits_loading: false,
             prorated_request_limits_info_mouse_states: Default::default(),
             upgrade_link: MouseStateHandle::default(),
-            anonymous_user_sign_up_button: MouseStateHandle::default(),
             enterprise_contact_us_link: MouseStateHandle::default(),
             stripe_billing_portal_link: MouseStateHandle::default(),
             admin_panel_link: MouseStateHandle::default(),
@@ -734,7 +732,6 @@ impl BillingAndUsagePageView {
 
 #[derive(Debug, Clone)]
 pub enum BillingAndUsagePageEvent {
-    SignupAnonymousUser,
     ShowToast {
         message: String,
         flavor: ToastFlavor,
@@ -799,9 +796,6 @@ impl TypedActionView for BillingAndUsagePageView {
             }
             BillingAndUsagePageAction::ContactSupport => {
                 AdminActions::contact_support(ctx);
-            }
-            BillingAndUsagePageAction::SignupAnonymousUser => {
-                ctx.emit(BillingAndUsagePageEvent::SignupAnonymousUser);
             }
             BillingAndUsagePageAction::AttemptLoginGatedUpgrade => {
                 AuthManager::handle(ctx).update(ctx, |auth_manager, ctx| {
@@ -1037,7 +1031,6 @@ pub enum BillingAndUsagePageAction {
         team_uid: ServerId,
     },
     ContactSupport,
-    SignupAnonymousUser,
     AttemptLoginGatedUpgrade,
     UpdateUsageBasedPricingSettings {
         team_uid: ServerId,
@@ -3332,33 +3325,6 @@ impl BillingAndUsagePageView {
         auth_state: &AuthState,
         appearance: &Appearance,
     ) -> Box<dyn Element> {
-        let button_styles = UiComponentStyles {
-            font_size: Some(14.),
-            font_weight: Some(Weight::Semibold),
-            border_radius: Some(CornerRadius::with_all(Radius::Pixels(4.))),
-            padding: Some(Coords {
-                top: 12.,
-                bottom: 12.,
-                left: 40.,
-                right: 40.,
-            }),
-            ..Default::default()
-        };
-
-        let user_info = appearance
-            .ui_builder()
-            .button(
-                ButtonVariant::Accent,
-                self.anonymous_user_sign_up_button.clone(),
-            )
-            .with_style(button_styles)
-            .with_text_label("Sign up".to_owned())
-            .build()
-            .on_click(move |ctx, _, _| {
-                ctx.dispatch_typed_action(BillingAndUsagePageAction::SignupAnonymousUser);
-            })
-            .finish();
-
         let mut plan_info = Flex::column()
             .with_main_axis_alignment(MainAxisAlignment::SpaceEvenly)
             .with_cross_axis_alignment(CrossAxisAlignment::End);
@@ -3399,7 +3365,7 @@ impl BillingAndUsagePageView {
                 Shrinkable::new(
                     1.0,
                     Flex::row()
-                        .with_child(user_info)
+                        .with_child(Empty::new().finish())
                         .with_main_axis_alignment(MainAxisAlignment::Start)
                         .with_main_axis_size(MainAxisSize::Max)
                         .finish(),

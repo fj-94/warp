@@ -21,12 +21,7 @@ use warpui::{
 #[derive(Debug, Clone)]
 pub enum WarpDriveSettingsPageAction {
     ToggleShowWarpDrive,
-    SignUp,
     OpenUrl(String),
-}
-
-pub enum WarpDriveSettingsPageEvent {
-    SignUp,
 }
 
 pub struct WarpDriveSettingsPageView {
@@ -48,7 +43,7 @@ impl WarpDriveSettingsPageView {
 }
 
 impl Entity for WarpDriveSettingsPageView {
-    type Event = WarpDriveSettingsPageEvent;
+    type Event = ();
 }
 
 impl TypedActionView for WarpDriveSettingsPageView {
@@ -61,9 +56,6 @@ impl TypedActionView for WarpDriveSettingsPageView {
                     report_if_error!(settings.enable_warp_drive.toggle_and_save_value(ctx));
                 });
                 ctx.notify();
-            }
-            WarpDriveSettingsPageAction::SignUp => {
-                ctx.emit(WarpDriveSettingsPageEvent::SignUp);
             }
             WarpDriveSettingsPageAction::OpenUrl(url) => {
                 ctx.open_url(url.as_str());
@@ -111,9 +103,7 @@ impl From<ViewHandle<WarpDriveSettingsPageView>> for SettingsPageViewHandle {
 }
 
 #[derive(Default)]
-struct WarpDriveHeaderWidget {
-    sign_up_button: MouseStateHandle,
-}
+struct WarpDriveHeaderWidget;
 
 impl SettingsWidget for WarpDriveHeaderWidget {
     type View = WarpDriveSettingsPageView;
@@ -135,8 +125,6 @@ impl SettingsWidget for WarpDriveHeaderWidget {
         appearance: &Appearance,
         _app: &AppContext,
     ) -> Box<dyn Element> {
-        let ui_builder = appearance.ui_builder();
-
         let message = Container::new(
             Text::new_inline(
                 "To use Warp Drive, please create an account.".to_string(),
@@ -151,40 +139,12 @@ impl SettingsWidget for WarpDriveHeaderWidget {
             )
             .finish(),
         )
-        .with_margin_right(16.)
-        .finish();
-
-        let button = Container::new(
-            ui_builder
-                .button(ButtonVariant::Accent, self.sign_up_button.clone())
-                .with_style(UiComponentStyles {
-                    font_size: Some(14.),
-                    font_weight: Some(Weight::Semibold),
-                    border_radius: Some(warpui::elements::CornerRadius::with_all(
-                        warpui::elements::Radius::Pixels(4.),
-                    )),
-                    padding: Some(Coords {
-                        top: 8.,
-                        bottom: 8.,
-                        left: 24.,
-                        right: 24.,
-                    }),
-                    ..Default::default()
-                })
-                .with_text_label("Sign up".to_owned())
-                .build()
-                .on_click(move |ctx, _, _| {
-                    ctx.dispatch_typed_action(WarpDriveSettingsPageAction::SignUp);
-                })
-                .finish(),
-        )
         .finish();
 
         Container::new(
             Flex::row()
                 .with_cross_axis_alignment(warpui::elements::CrossAxisAlignment::Center)
                 .with_child(Shrinkable::new(1., message).finish())
-                .with_child(button)
                 .finish(),
         )
         .with_padding_bottom(15.)

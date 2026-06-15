@@ -630,7 +630,6 @@ impl View for CodeSettingsPageView {
 
 #[derive(Debug, Clone)]
 pub enum CodeSettingsPageEvent {
-    SignupAnonymousUser,
     OpenLspLogs { log_path: PathBuf },
     OpenProjectRules { rule_paths: Vec<PathBuf> },
 }
@@ -649,7 +648,6 @@ pub enum CodeSettingsPageAction {
     #[cfg(all(not(target_family = "wasm"), feature = "remote_server_support"))]
     DeleteRemoteIndex(RemotePath),
     ManualAddDirectory,
-    SignupAnonymousUser,
     /// Toggle an LSP server on/off for a workspace.
     ToggleLspServer {
         workspace_path: PathBuf,
@@ -766,9 +764,6 @@ impl TypedActionView for CodeSettingsPageView {
             }
             CodeSettingsPageAction::ManualAddDirectory => {
                 self.open_directory_picker(ctx);
-            }
-            CodeSettingsPageAction::SignupAnonymousUser => {
-                ctx.emit(CodeSettingsPageEvent::SignupAnonymousUser);
             }
             CodeSettingsPageAction::ToggleLspServer {
                 workspace_path,

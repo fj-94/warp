@@ -43,7 +43,8 @@ use warpui::{
 const HEADER_FONT_SIZE: f32 = 18.;
 const HEADER_MARGIN_BOTTOM: f32 = 32.;
 const HEADER_TEXT: &str = "Invite a friend to Warp";
-const ANONYMOUS_USER_HEADER_TEXT: &str = "Sign up to participate in Warp's referral program";
+const ANONYMOUS_USER_HEADER_TEXT: &str =
+    "A Warp account is required to participate in the referral program";
 
 const INVITE_FIELD_LABEL_BOTTOM_MARGIN: f32 = 8.;
 
@@ -115,11 +116,9 @@ enum ApiState {
 pub enum ReferralsPageAction {
     CopyLink,
     SendEmailInvite,
-    SignupAnonymousUser,
 }
 
 pub enum ReferralsPageEvent {
-    SignupAnonymousUser,
     FocusModal,
     ShowToast {
         message: String,
@@ -438,9 +437,6 @@ impl TypedActionView for ReferralsPageView {
         match action {
             ReferralsPageAction::CopyLink => self.copy_link(ctx),
             ReferralsPageAction::SendEmailInvite => self.send_email_invite(ctx),
-            ReferralsPageAction::SignupAnonymousUser => {
-                ctx.emit(ReferralsPageEvent::SignupAnonymousUser)
-            }
         }
     }
 }
@@ -484,7 +480,6 @@ fn validate_email(email: &str) -> anyhow::Result<(), EmailValidationError> {
 struct ReferralsWidget {
     copy_link_mouse_state: MouseStateHandle,
     send_email_mouse_state: MouseStateHandle,
-    sign_up_button_mouse_state: MouseStateHandle,
     term_docs_highlighted_hyperlink: HighlightedHyperlink,
 }
 
@@ -637,33 +632,6 @@ impl ReferralsWidget {
     }
 
     fn render_signup_section(&self, appearance: &Appearance) -> Box<dyn Element> {
-        let button_styles = UiComponentStyles {
-            font_size: Some(14.),
-            font_weight: Some(Weight::Semibold),
-            border_radius: Some(CornerRadius::with_all(Radius::Pixels(4.))),
-            padding: Some(Coords {
-                top: 12.,
-                bottom: 12.,
-                left: 40.,
-                right: 40.,
-            }),
-            ..Default::default()
-        };
-
-        let sign_up_button = appearance
-            .ui_builder()
-            .button(
-                ButtonVariant::Accent,
-                self.sign_up_button_mouse_state.clone(),
-            )
-            .with_style(button_styles)
-            .with_text_label("Sign up".to_owned())
-            .build()
-            .on_click(move |ctx, _, _| {
-                ctx.dispatch_typed_action(ReferralsPageAction::SignupAnonymousUser);
-            })
-            .finish();
-
         Flex::column()
             .with_child(
                 Container::new(
@@ -680,7 +648,6 @@ impl ReferralsWidget {
                 .with_margin_bottom(HEADER_MARGIN_BOTTOM)
                 .finish(),
             )
-            .with_child(Flex::row().with_child(sign_up_button).finish())
             .finish()
     }
 

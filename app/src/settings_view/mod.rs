@@ -218,7 +218,6 @@ pub enum SettingsViewEvent {
     CheckForUpdate,
     LaunchNetworkLogging,
     OpenWarpDrive,
-    SignupAnonymousUser,
     ShowToast {
         message: String,
         flavor: ToastFlavor,
@@ -1626,9 +1625,6 @@ impl SettingsView {
         ctx: &mut ViewContext<Self>,
     ) {
         match event {
-            BillingAndUsagePageEvent::SignupAnonymousUser => {
-                ctx.emit(SettingsViewEvent::SignupAnonymousUser)
-            }
             BillingAndUsagePageEvent::ShowToast { message, flavor } => {
                 ctx.emit(SettingsViewEvent::ShowToast {
                     message: message.clone(),
@@ -1761,9 +1757,6 @@ impl SettingsView {
             AISettingsPageEvent::OpenExecutionProfileEditor(profile_id) => {
                 ctx.emit(SettingsViewEvent::OpenExecutionProfileEditor(*profile_id));
             }
-            AISettingsPageEvent::SignupAnonymousUser => {
-                ctx.emit(SettingsViewEvent::SignupAnonymousUser)
-            }
             AISettingsPageEvent::ShowModal | AISettingsPageEvent::HideModal => {
                 // Modal rendering is handled in get_modal_content_for_page
                 ctx.notify();
@@ -1777,9 +1770,6 @@ impl SettingsView {
         ctx: &mut ViewContext<Self>,
     ) {
         match event {
-            CodeSettingsPageEvent::SignupAnonymousUser => {
-                ctx.emit(SettingsViewEvent::SignupAnonymousUser)
-            }
             CodeSettingsPageEvent::OpenLspLogs { log_path } => {
                 ctx.emit(SettingsViewEvent::OpenLspLogs {
                     log_path: log_path.clone(),

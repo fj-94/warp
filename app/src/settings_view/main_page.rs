@@ -130,7 +130,6 @@ pub enum MainPageAction {
     GenerateStripeBillingPortalLink {
         team_uid: ServerId,
     },
-    SignupAnonymousUser,
     OpenUrl(String),
 }
 
@@ -161,7 +160,6 @@ pub enum MainSettingsPageEvent {
     CheckForUpdate,
     #[allow(dead_code)]
     OpenWarpDrive,
-    SignupAnonymousUser,
 }
 
 pub struct MainSettingsPageView {
@@ -233,9 +231,6 @@ impl TypedActionView for MainSettingsPageView {
                     user_workspaces.generate_stripe_billing_portal_link(*team_uid, ctx);
                 });
             }
-            MainPageAction::SignupAnonymousUser => {
-                ctx.emit(MainSettingsPageEvent::SignupAnonymousUser);
-            }
             MainPageAction::OpenUrl(url) => {
                 ctx.open_url(url);
             }
@@ -304,7 +299,6 @@ impl MainSettingsPageView {
 #[derive(Default)]
 struct AccountWidgetStateHandles {
     upgrade_link: MouseStateHandle,
-    anonymous_user_sign_up_button: MouseStateHandle,
     enterprise_contact_us_link: MouseStateHandle,
     stripe_billing_portal_link: MouseStateHandle,
 }
@@ -320,33 +314,6 @@ impl AccountWidget {
         auth_state: &AuthState,
         appearance: &Appearance,
     ) -> Box<dyn Element> {
-        let button_styles = UiComponentStyles {
-            font_size: Some(14.),
-            font_weight: Some(Weight::Semibold),
-            border_radius: Some(CornerRadius::with_all(Radius::Pixels(4.))),
-            padding: Some(Coords {
-                top: 12.,
-                bottom: 12.,
-                left: 40.,
-                right: 40.,
-            }),
-            ..Default::default()
-        };
-
-        let user_info = appearance
-            .ui_builder()
-            .button(
-                ButtonVariant::Accent,
-                self.ui_state_handles.anonymous_user_sign_up_button.clone(),
-            )
-            .with_style(button_styles)
-            .with_text_label("Sign up".to_owned())
-            .build()
-            .on_click(move |ctx, _, _| {
-                ctx.dispatch_typed_action(MainPageAction::SignupAnonymousUser);
-            })
-            .finish();
-
         let mut plan_info = Flex::column()
             .with_main_axis_alignment(MainAxisAlignment::SpaceEvenly)
             .with_cross_axis_alignment(CrossAxisAlignment::End);
@@ -390,7 +357,7 @@ impl AccountWidget {
                 Shrinkable::new(
                     1.0,
                     Flex::row()
-                        .with_child(user_info)
+                        .with_child(Empty::new().finish())
                         .with_main_axis_alignment(MainAxisAlignment::Start)
                         .with_main_axis_size(MainAxisSize::Max)
                         .finish(),

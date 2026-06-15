@@ -2595,7 +2595,6 @@ pub enum AISettingsPageEvent {
     OpenAIFactCollection,
     OpenMCPServerCollection,
     OpenExecutionProfileEditor(ClientProfileId),
-    SignupAnonymousUser,
     ShowModal,
     HideModal,
 }
@@ -2663,7 +2662,6 @@ pub enum AISettingsPageAction {
     AddToMCPDenylist(uuid::Uuid),
     RemoveFromMCPDenylist(uuid::Uuid),
     CreateProfile,
-    SignupAnonymousUser,
     ToggleAwsBedrockAutoLogin,
     ToggleAwsBedrockCredentialsEnabled,
     RefreshAwsBedrockCredentials,
@@ -3348,9 +3346,6 @@ impl TypedActionView for AISettingsPageView {
                     ctx.emit(AISettingsPageEvent::OpenExecutionProfileEditor(profile_id));
                 }
                 ctx.notify();
-            }
-            AISettingsPageAction::SignupAnonymousUser => {
-                ctx.emit(AISettingsPageEvent::SignupAnonymousUser);
             }
             AISettingsPageAction::ToggleAwsBedrockAutoLogin => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
@@ -7397,13 +7392,9 @@ impl SettingsWidget for ApiKeysWidget {
             } else if FeatureFlag::SoloUserByok.is_enabled()
                 && auth_state.is_anonymous_or_logged_out()
             {
-                vec![
-                    FormattedTextFragment::hyperlink_action(
-                        "Create an account",
-                        AISettingsPageAction::SignupAnonymousUser,
-                    ),
-                    FormattedTextFragment::plain_text(" to use your own API keys."),
-                ]
+                vec![FormattedTextFragment::plain_text(
+                    "A Warp account is required to use your own API keys.",
+                )]
             } else {
                 let user_id = auth_state.user_id().unwrap_or_default();
                 let upgrade_url = UserWorkspaces::upgrade_link(user_id);
