@@ -6,6 +6,7 @@ use crate::TelemetryEvent;
 use crate::{
     ai::execution_profiles::profiles::ClientProfileId,
     appearance::Appearance,
+    auth::{auth_view_modal::AuthViewVariant, AuthManager, AuthStateProvider},
     editor::{
         EditorView, Event as EditorEvent, PropagateAndNoOpNavigationKeys, SingleLineEditorOptions,
         TextColors, TextOptions,
@@ -14,8 +15,9 @@ use crate::{
     pane_group::{
         pane::view, BackingView, Direction, PaneConfiguration, PaneEvent, SplitPaneState,
     },
+    report_if_error,
     server::server_api::ServerApiProvider,
-    settings::{AISettings, BlockVisibilitySettings, SettingsFileError},
+    settings::{AISettings, BlockVisibilitySettings, CloudPreferencesSettings, SettingsFileError},
     settings_view::mcp_servers_page::MCPServersSettingsPageEvent,
     terminal::{model::blockgrid::BlockGrid, SizeInfo},
     ui_components::icons,
@@ -24,6 +26,7 @@ use crate::{
     workspace::WorkspaceAction,
     GlobalResourceHandlesProvider,
 };
+use ::settings::Setting as _;
 use about_page::AboutPageView;
 use ai_page::{AISettingsPageAction, AISettingsPageEvent, AISettingsPageView, AISubpage};
 use appearance_page::{AppearancePageAction, AppearanceSettingsPageView};
@@ -35,6 +38,7 @@ use environments_page::EnvironmentsPageView;
 use features_page::{FeaturesPageView, FeaturesSettingsPageEvent};
 use itertools::Itertools as _;
 use keybindings::KeybindingsView;
+use lazy_static::lazy_static;
 use mcp_servers_page::MCPServersSettingsPageView;
 use nav::{SettingsNavItem, SettingsUmbrella};
 use pathfinder_geometry::vector::Vector2F;
@@ -47,6 +51,7 @@ use show_blocks_view::{ShowBlocksEvent, ShowBlocksView};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Mutex;
 use warp_core::send_telemetry_from_ctx;
 use warp_core::{
     channel::ChannelState, context_flag::ContextFlag, features::FeatureFlag,
@@ -110,7 +115,6 @@ pub use billing_and_usage_page::create_discount_badge;
 pub use code_page::CodeSettingsPageView;
 pub use features_page::FeaturesPageAction;
 
-pub fn handle_experiment_change(_app: &mut AppContext) {}
 pub use settings_page::{
     render_body_item_label, render_info_icon, render_input_list, render_separator, AdditionalInfo,
     InputListItem, LocalOnlyIconState, ToggleState,
@@ -170,6 +174,10 @@ const SECTION_BORDER_WIDTH: f32 = 1.;
 
 const POSITION_ID: &str = "settings_pane";
 
+lazy_static! {
+    static ref SETTINGS_SYNC_BINDINGS_ADDED: Mutex<bool> = Mutex::new(false);
+}
+
 pub(super) fn editor_text_colors(appearance: &Appearance) -> TextColors {
     let theme = appearance.theme();
     TextColors {
@@ -215,7 +223,6 @@ pub(super) fn render_model_chips(
 pub enum SettingsViewEvent {
     Pane(PaneEvent),
     StartResize,
-    CheckForUpdate,
     LaunchNetworkLogging,
     OpenWarpDrive,
     ShowToast {
@@ -256,6 +263,7 @@ pub enum SettingsSection {
     /// External callers should navigate to a specific subpage (e.g. `WarpAgent`) instead.
     AI,
     // ── Agents umbrella subpages ──
+    #[default]
     WarpAgent,
     AgentProfiles,
     AgentMCPServers,
@@ -389,7 +397,7 @@ impl FromStr for SettingsSection {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "About" => Ok(Self::About),
-            "Account" => Ok(Self::Account),
+            "Account" => Ok(Self::default()),
             "AI" => Ok(Self::AI),
             "MCP Servers" => Ok(Self::MCPServers),
             "Billing and usage" => Ok(Self::BillingAndUsage),
@@ -562,11 +570,42 @@ pub mod flags {
     pub const SHOW_GLOBAL_SEARCH: &str = "ShowGlobalSearch";
 }
 
+fn maybe_add_settings_sync_toggle_binding<T: Action + Clone>(
+    app: &mut AppContext,
+    context: &ContextPredicate,
+    builder: fn(SettingsAction) -> T,
+    toggle_binding_pairs: &mut Vec<ToggleSettingActionPair<T>>,
+) {
+    let mut lock = SETTINGS_SYNC_BINDINGS_ADDED
+        .lock()
+        .expect("settings sync bindings lock poisoned");
+    if !*lock {
+        *lock = true;
+        toggle_binding_pairs.push(
+            ToggleSettingActionPair::new(
+                "settings sync",
+                builder(SettingsAction::ToggleSettingsSync),
+                context,
+                flags::SETTINGS_SYNC_FLAG,
+            )
+            .is_supported_on_current_platform(
+                CloudPreferencesSettings::as_ref(app)
+                    .settings_sync_enabled
+                    .is_supported_on_current_platform(),
+            ),
+        );
+    }
+}
+
 pub fn init_actions_from_parent_view<T: Action + Clone>(
     app: &mut AppContext,
     context: &ContextPredicate,
     builder: fn(SettingsAction) -> T,
 ) {
+    let mut toggle_binding_pairs = Vec::new();
+    maybe_add_settings_sync_toggle_binding(app, context, builder, &mut toggle_binding_pairs);
+    ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(toggle_binding_pairs, app);
+
     appearance_page::init_actions_from_parent_view(app, context, builder);
     features_page::init_actions_from_parent_view(app, context, builder);
     warpify_page::init_actions_from_parent_view(app, context, builder);
@@ -646,6 +685,17 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
         FixedBinding::new("down", SettingsAction::Down, context.clone()),
         FixedBinding::new("up", SettingsAction::Up, context.clone()),
     ]);
+}
+
+pub fn handle_experiment_change(app: &mut AppContext) {
+    let mut toggle_binding_pairs: Vec<ToggleSettingActionPair<WorkspaceAction>> = Vec::new();
+    maybe_add_settings_sync_toggle_binding(
+        app,
+        &id!("Workspace"),
+        WorkspaceAction::DispatchToSettingsTab,
+        &mut toggle_binding_pairs,
+    );
+    ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(toggle_binding_pairs, app);
 }
 
 /// The string the user will see when the action is enabled or disabled.
@@ -876,6 +926,7 @@ pub enum DebugSettingsAction {
 pub enum SettingsAction {
     SelectAndRefresh(SettingsSection),
     ToggleUmbrella(usize),
+    ToggleSettingsSync,
     AppearancePageToggle(AppearancePageAction),
     FeaturesPageToggle(FeaturesPageAction),
     AI(AISettingsPageAction),
@@ -1634,6 +1685,36 @@ impl SettingsView {
             BillingAndUsagePageEvent::ShowModal => ctx.notify(),
             BillingAndUsagePageEvent::HideModal => ctx.notify(),
         }
+    }
+
+    fn toggle_settings_sync(&mut self, ctx: &mut ViewContext<Self>) {
+        if AuthStateProvider::as_ref(ctx)
+            .get()
+            .is_anonymous_or_logged_out()
+        {
+            AuthManager::handle(ctx).update(ctx, |auth_manager, ctx| {
+                auth_manager.attempt_login_gated_feature(
+                    "Toggle Settings Sync",
+                    AuthViewVariant::RequireLoginCloseable,
+                    ctx,
+                )
+            });
+            return;
+        }
+
+        let new_value = CloudPreferencesSettings::handle(ctx).update(ctx, |prefs_settings, ctx| {
+            report_if_error!(prefs_settings
+                .settings_sync_enabled
+                .toggle_and_save_value(ctx));
+            *prefs_settings.settings_sync_enabled
+        });
+        send_telemetry_from_ctx!(
+            TelemetryEvent::ToggleSettingsSync {
+                is_settings_sync_enabled: new_value,
+            },
+            ctx
+        );
+        ctx.notify();
     }
 
     fn handle_appearance_page_event(
@@ -2487,6 +2568,7 @@ impl TypedActionView for SettingsView {
                     ctx.notify();
                 }
             }
+            SettingsAction::ToggleSettingsSync => self.toggle_settings_sync(ctx),
             SettingsAction::AppearancePageToggle(appearance_action) => {
                 if let Some(appearance_page) = self.settings_page(SettingsSection::Appearance) {
                     if let SettingsPageViewHandle::Appearance(view) = &appearance_page.view_handle {

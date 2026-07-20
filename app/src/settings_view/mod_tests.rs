@@ -211,6 +211,10 @@ fn subpage_from_str_parses_display_names() {
         Ok(SettingsSection::WarpAgent)
     );
     assert_eq!(
+        SettingsSection::from_str("Account"),
+        Ok(SettingsSection::default())
+    );
+    assert_eq!(
         SettingsSection::from_str("Profiles"),
         Ok(SettingsSection::AgentProfiles)
     );
@@ -406,17 +410,17 @@ fn nav_filter_includes_matching_subpage_and_excludes_others() {
 
 #[test]
 fn nav_filter_falls_back_to_pages_filter_for_top_level_pages() {
-    // Top-level pages (Account, Appearance, etc.) have no subpage_filter entry.
+    // Top-level pages (Billing and usage, Appearance, etc.) have no subpage_filter entry.
     // They fall back to pages_filter using parent_page_section() == themselves.
     let subpage_filter: HashMap<SettingsSection, MatchData> = HashMap::new();
     let pages_filter = vec![
-        (SettingsSection::Account, MatchData::Uncounted(true)),
+        (SettingsSection::BillingAndUsage, MatchData::Uncounted(true)),
         (SettingsSection::Appearance, MatchData::Countable(0)),
         (SettingsSection::Features, MatchData::Uncounted(true)),
     ];
 
     assert!(section_passes_nav_filter(
-        SettingsSection::Account,
+        SettingsSection::BillingAndUsage,
         &subpage_filter,
         &pages_filter
     ));
@@ -557,6 +561,7 @@ fn auto_select_falls_back_to_top_level_page_when_no_subpages_match() {
         SettingsSection::AgentProfiles,
         SettingsSection::Knowledge,
         SettingsSection::ThirdPartyCLIAgents,
+        SettingsSection::BillingAndUsage,
     ];
 
     let first = first_visible_section(&nav_order, &filter, &pages_visible);
@@ -600,6 +605,7 @@ fn auto_select_with_no_matches_anywhere() {
         SettingsSection::Appearance,
         SettingsSection::WarpAgent,
         SettingsSection::AgentProfiles,
+        SettingsSection::BillingAndUsage,
     ];
 
     let first = first_visible_section(&nav_order, &filter, &pages_visible);
