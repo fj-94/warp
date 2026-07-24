@@ -247,7 +247,6 @@ pub enum SettingsSection {
     Account,
     MCPServers,
     BillingAndUsage,
-    #[default]
     Appearance,
     Features,
     Keybindings,
@@ -397,7 +396,7 @@ impl FromStr for SettingsSection {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "About" => Ok(Self::About),
-            "Account" => Ok(Self::default()),
+            "Account" => Ok(Self::WarpAgent),
             "AI" => Ok(Self::AI),
             "MCP Servers" => Ok(Self::MCPServers),
             "Billing and usage" => Ok(Self::BillingAndUsage),
@@ -1295,14 +1294,14 @@ impl SettingsView {
         // Resolve the initial page: map internal backing-page sections to their default subpage.
         let initial_page = match page {
             Some(SettingsSection::AI) => SettingsSection::WarpAgent,
+            Some(SettingsSection::Account) => SettingsSection::WarpAgent,
             Some(SettingsSection::Code) if cfg!(feature = "offline_oss") => {
                 SettingsSection::EditorAndCodeReview
             }
             Some(SettingsSection::Code) => SettingsSection::CodeIndexing,
             Some(section) if section.is_hidden_for_offline_oss() => SettingsSection::Appearance,
             Some(
-                SettingsSection::Account
-                | SettingsSection::Referrals
+                SettingsSection::Referrals
                 | SettingsSection::Teams
                 | SettingsSection::WarpDrive
                 | SettingsSection::Privacy,
@@ -1898,13 +1897,13 @@ impl SettingsView {
         // External callers should use subpage variants directly.
         let section = match section {
             SettingsSection::AI => SettingsSection::WarpAgent,
+            SettingsSection::Account => SettingsSection::WarpAgent,
             SettingsSection::Code if cfg!(feature = "offline_oss") => {
                 SettingsSection::EditorAndCodeReview
             }
             SettingsSection::Code => SettingsSection::CodeIndexing,
             section if section.is_hidden_for_offline_oss() => SettingsSection::Appearance,
-            SettingsSection::Account
-            | SettingsSection::Referrals
+            SettingsSection::Referrals
             | SettingsSection::Teams
             | SettingsSection::WarpDrive
             | SettingsSection::Privacy => SettingsSection::Appearance,

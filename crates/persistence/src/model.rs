@@ -14,9 +14,9 @@ use super::schema::{
     generic_string_objects, ignored_suggestions, mcp_environment_variables,
     mcp_server_installations, mcp_server_panes, notebook_panes, notebooks, object_actions,
     object_metadata, object_permissions, pane_branches, pane_leaves, pane_nodes, panels,
-    project_rules, projects, server_experiments, settings_panes, tabs, team_members, team_settings,
-    teams, terminal_panes, user_profiles, welcome_panes, windows, workflow_panes, workflows,
-    workspace_language_server, workspace_metadata, workspace_teams, workspaces,
+    project_rules, projects, server_experiments, settings_panes, sftp_panes, tabs, team_members,
+    team_settings, teams, terminal_panes, user_profiles, welcome_panes, windows, workflow_panes,
+    workflows, workspace_language_server, workspace_metadata, workspace_teams, workspaces,
 };
 
 #[derive(Insertable)]
@@ -467,6 +467,15 @@ pub struct SettingsPane {
 }
 
 #[derive(Identifiable, Queryable, Selectable)]
+#[diesel(table_name = sftp_panes)]
+#[diesel(primary_key(id))]
+pub struct SftpPane {
+    pub id: i32,
+    pub target: Option<String>,
+    pub remote_path: Option<String>,
+}
+
+#[derive(Identifiable, Queryable, Selectable)]
 #[diesel(table_name = welcome_panes)]
 #[diesel(primary_key(id))]
 pub struct WelcomePane {
@@ -569,6 +578,9 @@ pub const AI_DOCUMENT_PANE_KIND: &str = "ai_document";
 /// The [`pane_leaves::kind`] value for ambient agent (cloud mode) panes.
 pub const AMBIENT_AGENT_PANE_KIND: &str = "ambient_agent";
 
+/// The [`pane_leaves::kind`] value for SFTP panes.
+pub const SFTP_PANE_KIND: &str = "sftp";
+
 #[derive(Insertable)]
 #[diesel(table_name = terminal_panes)]
 pub struct NewTerminalPane {
@@ -639,6 +651,14 @@ pub struct NewCodeReviewPane {
 pub struct NewSettingsPane {
     pub id: i32,
     pub current_page: String,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = sftp_panes)]
+pub struct NewSftpPane {
+    pub id: i32,
+    pub target: Option<String>,
+    pub remote_path: Option<String>,
 }
 
 #[derive(Insertable)]

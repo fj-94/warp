@@ -4,6 +4,11 @@ use settings_page::MatchData;
 // ── SettingsSection classification ──────────────────────────────────────────
 
 #[test]
+fn default_section_is_warp_agent() {
+    assert_eq!(SettingsSection::default(), SettingsSection::WarpAgent);
+}
+
+#[test]
 fn ai_subpages_are_identified() {
     assert!(SettingsSection::WarpAgent.is_ai_subpage());
     assert!(SettingsSection::AgentProfiles.is_ai_subpage());
@@ -212,7 +217,7 @@ fn subpage_from_str_parses_display_names() {
     );
     assert_eq!(
         SettingsSection::from_str("Account"),
-        Ok(SettingsSection::default())
+        Ok(SettingsSection::WarpAgent)
     );
     assert_eq!(
         SettingsSection::from_str("Profiles"),

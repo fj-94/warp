@@ -139,6 +139,13 @@ pub fn init(app: &mut AppContext) {
         WorkspaceAction::DumpDebugInfo,
         id!("Workspace"),
     )]);
+    #[cfg(feature = "sftp")]
+    app.register_editable_bindings([EditableBinding::new(
+        "workspace:open_sftp",
+        "Open SFTP",
+        WorkspaceAction::OpenSftpPane,
+    )
+    .with_context_predicate(id!("Workspace"))]);
     app.register_fixed_bindings([
         FixedBinding::new(
             "escape",

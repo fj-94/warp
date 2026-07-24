@@ -4,8 +4,8 @@ use crate::text::word_boundaries::WordBoundariesPolicy;
 use crate::text::{IsRect, SelectionDirection, SelectionType};
 use crate::TaskId;
 use crate::{
-    event::DispatchedEvent, AfterLayoutContext, AppContext, Element, Event, EventContext,
-    PaintContext,
+    event::{DispatchedEvent, ModifiersState},
+    AfterLayoutContext, AppContext, Element, Event, EventContext, PaintContext,
 };
 use instant::Instant;
 use pathfinder_geometry::rect::RectF;
@@ -17,6 +17,8 @@ use std::time::Duration;
 /// First arg is is_hovered. True when hovering in, false when hovering out.
 type HoverHandler = Box<dyn FnMut(bool, &mut EventContext, &AppContext, Vector2F)>;
 type ClickHandler = Box<dyn FnMut(&mut EventContext, &AppContext, Vector2F)>;
+type ModifiedClickHandler =
+    Box<dyn FnMut(&mut EventContext, &AppContext, Vector2F, ModifiersState)>;
 
 pub struct Hoverable {
     child: Box<dyn Element>,
@@ -25,7 +27,7 @@ pub struct Hoverable {
     hover_handler: Option<HoverHandler>,
     // A click is comprised of a mouse down and a mouse up,
     // both within the hoverable.
-    click_handler: Option<ClickHandler>,
+    click_handler: Option<ModifiedClickHandler>,
     mouse_down_handler: Option<ClickHandler>,
     double_click_handler: Option<ClickHandler>,
     middle_click_handler: Option<ClickHandler>,
@@ -241,6 +243,19 @@ impl Hoverable {
     pub fn on_click<F>(mut self, callback: F) -> Self
     where
         F: 'static + FnMut(&mut EventContext, &AppContext, Vector2F),
+    {
+        let mut callback = callback;
+        self.click_handler = Some(Box::new(move |ctx, app, position, _modifiers| {
+            callback(ctx, app, position);
+        }));
+        self
+    }
+
+    /// Fires when the mouse is released within the hoverable after it was pressed within the
+    /// hoverable, including the modifier state from the mouse-up event.
+    pub fn on_click_with_modifiers<F>(mut self, callback: F) -> Self
+    where
+        F: 'static + FnMut(&mut EventContext, &AppContext, Vector2F, ModifiersState),
     {
         self.click_handler = Some(Box::new(callback));
         self
@@ -642,7 +657,10 @@ impl Element for Hoverable {
                     return true;
                 }
             }
-            Event::LeftMouseUp { position, .. } => {
+            Event::LeftMouseUp {
+                position,
+                modifiers,
+            } => {
                 // Mouse-up should always reset clicked and double-clicked to false.
                 let click_count = self.state().click_count.take();
 
@@ -667,7 +685,7 @@ impl Element for Hoverable {
                     return true;
                 } else if click_count.is_some() && self.click_handler.is_some() {
                     let handler = self.click_handler.as_mut().expect("handler should exist");
-                    handler(ctx, app, *position);
+                    handler(ctx, app, *position, *modifiers);
                     ctx.notify();
                     return true;
                 }

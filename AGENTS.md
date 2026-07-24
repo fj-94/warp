@@ -35,25 +35,33 @@ Before packaging, run the offline Windows check:
 cargo check -p warp --bin warp-oss --no-default-features --features offline_oss,release_bundle,nld_classifier_v1,nld_heuristic_v1 --target x86_64-pc-windows-gnu
 ```
 
-Build and package the executable:
+Build and package the portable directory. The executable is not standalone and must remain next to the bundled Windows DLLs, `x64/OpenConsole.exe`, `pwsh.ps1`, and `resources/`:
 
 ```sh
 cargo fmt
 CARGO_FULL_PROFILE=ross CARGO_BIN_NAME=oss WARP_APP_NAME=WarpOss cargo build -p warp --profile ross --bin warp-oss --no-default-features --features offline_oss,release_bundle,nld_classifier_v1,nld_heuristic_v1 --target x86_64-pc-windows-gnu
-mkdir -p dist
-rm -f dist/WarpOss-offline-windows-x86_64.exe dist/WarpOss-offline-windows-x86_64.zip
-cp target/x86_64-pc-windows-gnu/ross/warp-oss.exe dist/WarpOss-offline-windows-x86_64.exe
-x86_64-w64-mingw32-strip dist/WarpOss-offline-windows-x86_64.exe
-(cd dist && zip -9 -q WarpOss-offline-windows-x86_64.zip WarpOss-offline-windows-x86_64.exe)
+PACKAGE_DIR=dist/WarpOss-offline-windows-x86_64-portable
+rm -rf "$PACKAGE_DIR" dist/WarpOss-offline-windows-x86_64-portable.zip
+mkdir -p "$PACKAGE_DIR/x64"
+cp target/x86_64-pc-windows-gnu/ross/warp-oss.exe "$PACKAGE_DIR/warp-oss.exe"
+x86_64-w64-mingw32-strip "$PACKAGE_DIR/warp-oss.exe"
+cp app/assets/windows/x64/{conpty.dll,dxcompiler.dll,dxil.dll,msvcp140.dll,vcruntime140.dll,vcruntime140_1.dll} "$PACKAGE_DIR/"
+cp app/assets/windows/x64/OpenConsole.exe "$PACKAGE_DIR/x64/"
+cp app/assets/bundled/bootstrap/pwsh.ps1 "$PACKAGE_DIR/"
+cp app/channels/oss/icon/no-padding/icon.ico "$PACKAGE_DIR/"
+cp -a target/x86_64-pc-windows-gnu/ross/resources "$PACKAGE_DIR/"
+(cd dist && zip -9 -q -r WarpOss-offline-windows-x86_64-portable.zip WarpOss-offline-windows-x86_64-portable)
 ```
 
 Verify the package:
 
 ```sh
-file dist/WarpOss-offline-windows-x86_64.exe
-ls -lh dist/WarpOss-offline-windows-x86_64.exe dist/WarpOss-offline-windows-x86_64.zip
-sha256sum dist/WarpOss-offline-windows-x86_64.exe dist/WarpOss-offline-windows-x86_64.zip
-x86_64-w64-mingw32-objdump -p dist/WarpOss-offline-windows-x86_64.exe | rg 'DLL Name'
+PACKAGE_DIR=dist/WarpOss-offline-windows-x86_64-portable
+file "$PACKAGE_DIR/warp-oss.exe"
+ls -lh "$PACKAGE_DIR/warp-oss.exe" dist/WarpOss-offline-windows-x86_64-portable.zip
+sha256sum "$PACKAGE_DIR/warp-oss.exe" dist/WarpOss-offline-windows-x86_64-portable.zip
+x86_64-w64-mingw32-objdump -p "$PACKAGE_DIR/warp-oss.exe" | rg 'DLL Name'
+unzip -l dist/WarpOss-offline-windows-x86_64-portable.zip | rg 'warp-oss.exe|conpty.dll|dxcompiler.dll|dxil.dll|msvcp140.dll|vcruntime140(_1)?.dll|x64/OpenConsole.exe|pwsh.ps1|resources/settings_schema.json'
 cargo tree -p warp --no-default-features --features offline_oss,release_bundle,nld_classifier_v1,nld_heuristic_v1 --target x86_64-pc-windows-gnu -i remote_server
 ```
 

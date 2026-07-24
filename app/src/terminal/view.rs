@@ -7105,7 +7105,7 @@ impl TerminalView {
 
     /// Returns `None` for local sessions, `Some("user@hostname")` for remote.
     /// Used to key per-host plugin install failure tracking.
-    fn active_session_remote_host<C: ModelAsRef>(&self, ctx: &C) -> Option<String> {
+    pub(crate) fn active_session_remote_host<C: ModelAsRef>(&self, ctx: &C) -> Option<String> {
         self.active_block_session_id().and_then(|session_id| {
             let session = self.sessions.as_ref(ctx).get(session_id)?;
             if session.is_local() {
@@ -7113,6 +7113,29 @@ impl TerminalView {
             } else {
                 Some(format!("{}@{}", session.user(), session.hostname()))
             }
+        })
+    }
+
+    /// Returns the destination parsed from the SSH command that created the
+    /// active remote subshell. Shell-reported hostname values are intentionally
+    /// not used here because custom prompts can contaminate that metadata.
+    #[cfg(feature = "sftp")]
+    pub(crate) fn active_session_sftp_target<C: ModelAsRef>(&self, ctx: &C) -> Option<String> {
+        let session = self
+            .active_block_session_id()
+            .and_then(|session_id| self.sessions.as_ref(ctx).get(session_id))?;
+        if session.is_local() || session.is_wsl() {
+            return None;
+        }
+        let connection = session
+            .subshell_info()
+            .as_ref()
+            .and_then(|info| info.ssh_connection_info.as_ref())
+            .cloned()?;
+        let host = connection.host?;
+        Some(match connection.port {
+            Some(port) => format!("{host}:{port}"),
+            None => host,
         })
     }
 

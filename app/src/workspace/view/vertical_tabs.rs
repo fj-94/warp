@@ -3251,6 +3251,8 @@ impl PaneGroup {
             | IPaneType::NetworkLog
             | IPaneType::Welcome
             | IPaneType::DeferredPlaceholder => TypedPane::Other,
+            #[cfg(feature = "sftp")]
+            IPaneType::Sftp => TypedPane::Other,
             #[cfg(test)]
             IPaneType::Dummy => TypedPane::Other,
         }

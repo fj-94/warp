@@ -133,6 +133,8 @@ pub enum LeafContents {
     /// The in-app network log pane. Not persisted across restarts because the
     /// backing log is an in-memory ring buffer that starts empty on launch.
     NetworkLog,
+    #[cfg(feature = "sftp")]
+    Sftp(SftpPaneSnapshot),
     /// An entrypoint pane type to launch other pane types from a search palette. The default view
     /// when creating a tab.
     Welcome {
@@ -162,6 +164,8 @@ impl LeafContents {
             // Environment management panes are opened on-demand via workspace
             // actions and have no persistable state.
             | LeafContents::EnvironmentManagement(_) => false,
+            #[cfg(feature = "sftp")]
+            LeafContents::Sftp(_) => true,
             LeafContents::Terminal(_)
             | LeafContents::Notebook(_)
             | LeafContents::AIDocument(_)
@@ -177,6 +181,13 @@ impl LeafContents {
             | LeafContents::GetStarted => true,
         }
     }
+}
+
+#[cfg(feature = "sftp")]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SftpPaneSnapshot {
+    pub target: Option<String>,
+    pub remote_path: Option<String>,
 }
 
 /// Snapshot of an ambient agent pane.
@@ -301,6 +312,7 @@ pub enum LeftPanelDisplayedTab {
     GlobalSearch,
     WarpDrive,
     ConversationListView,
+    Sftp,
 }
 
 impl From<ToolPanelView> for LeftPanelDisplayedTab {
@@ -310,6 +322,8 @@ impl From<ToolPanelView> for LeftPanelDisplayedTab {
             ToolPanelView::GlobalSearch { .. } => LeftPanelDisplayedTab::GlobalSearch,
             ToolPanelView::WarpDrive => LeftPanelDisplayedTab::WarpDrive,
             ToolPanelView::ConversationListView => LeftPanelDisplayedTab::ConversationListView,
+            #[cfg(feature = "sftp")]
+            ToolPanelView::Sftp => LeftPanelDisplayedTab::Sftp,
         }
     }
 }

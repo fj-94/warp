@@ -1499,6 +1499,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "awaitable"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70af449c9a763cb655c6a1e5338b42d99c67190824ff90658c1e30be844c0775"
+dependencies = [
+ "awaitable-error",
+ "cfg-if",
+]
+
+[[package]]
+name = "awaitable-error"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5b3469636cdf8543cceab175efca534471f36eee12fb8374aba00eb5e7e7f8a"
+
+[[package]]
 name = "aws-config"
 version = "1.8.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3097,6 +3113,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "concurrent_arena"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a07f0a549fe58f8477a15f0f1c3aa8ced03a3cdeaa38a661530572f21ea963a0"
+dependencies = [
+ "arc-swap",
+ "parking_lot",
+ "triomphe",
+]
+
+[[package]]
 name = "console"
 version = "0.15.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4029,6 +4056,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4abae7035bf79b9877b779505d8cf3749285b80c43941eda66604841889451dc"
 dependencies = [
  "derive_builder_core",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "derive_destructure2"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64b697ac90ff296f0fc031ee5a61c7ac31fb9fff50e3fb32873b09223613fc0c"
+dependencies = [
+ "proc-macro2",
+ "quote",
  "syn 2.0.117",
 ]
 
@@ -5527,6 +5565,8 @@ dependencies = [
  "libc",
  "libgit2-sys",
  "log",
+ "openssl-probe",
+ "openssl-sys",
  "url",
 ]
 
@@ -7309,7 +7349,9 @@ checksum = "c9b3acc4b91781bb0b3386669d325163746af5f6e4f73e6d2d630e09a35f3487"
 dependencies = [
  "cc",
  "libc",
+ "libssh2-sys",
  "libz-sys",
+ "openssl-sys",
  "pkg-config",
 ]
 
@@ -7358,6 +7400,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "947e6816f7825b2b45027c2c32e7085da9934defa535de4a6a46b10a4d5257fa"
 dependencies = [
  "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
+name = "libssh2-sys"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c04141a07bb0c0bc461cb657808764de571702a59bc5c726c400ac9a7625e3ab"
+dependencies = [
+ "cc",
+ "libc",
+ "libz-sys",
+ "openssl-sys",
  "pkg-config",
  "vcpkg",
 ]
@@ -8573,7 +8629,7 @@ version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77e878c846a8abae00dd069496dbe8751b16ac1c3d6bd2a7283a938e8228f90d"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate 3.3.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -9116,6 +9172,81 @@ dependencies = [
  "cc",
  "nasm-rs",
  "walkdir",
+]
+
+[[package]]
+name = "openssh-sftp-client"
+version = "0.15.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7a575af2d0eaa7c8f96368924994a3ae1d484fd2b19750cc1049c1100a42e82"
+dependencies = [
+ "bytes",
+ "derive_destructure2",
+ "futures-core",
+ "once_cell",
+ "openssh-sftp-client-lowlevel",
+ "openssh-sftp-error",
+ "pin-project",
+ "scopeguard",
+ "tokio",
+ "tokio-io-utility",
+ "tokio-util",
+]
+
+[[package]]
+name = "openssh-sftp-client-lowlevel"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6d1a0e0eeb46100745a2c383c842042e1f04aa57a9c18aa41a16b6d4d58aeb0"
+dependencies = [
+ "awaitable",
+ "bytes",
+ "concurrent_arena",
+ "derive_destructure2",
+ "openssh-sftp-error",
+ "openssh-sftp-protocol",
+ "pin-project",
+ "tokio",
+ "tokio-io-utility",
+]
+
+[[package]]
+name = "openssh-sftp-error"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12a702f18f0595b4578b21fd120ae7aa45f4298a8b28ddcb2397ace6f5a8251a"
+dependencies = [
+ "awaitable-error",
+ "openssh-sftp-protocol-error",
+ "ssh_format_error",
+ "thiserror 2.0.17",
+ "tokio",
+]
+
+[[package]]
+name = "openssh-sftp-protocol"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9c862e0c56553146306507f55958c11ff554e02c46de287e6976e50d815b350"
+dependencies = [
+ "bitflags 2.9.4",
+ "num-derive",
+ "num-traits",
+ "openssh-sftp-protocol-error",
+ "serde",
+ "ssh_format",
+ "vec-strings",
+]
+
+[[package]]
+name = "openssh-sftp-protocol-error"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42b54df62ccfd9a7708a83a9d60c46293837e478f9f4c0829360dcfa60ede8d2"
+dependencies = [
+ "serde",
+ "thiserror 2.0.17",
+ "vec-strings",
 ]
 
 [[package]]
@@ -12361,6 +12492,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "ssh2-config"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2e5a3352c5c624ed815d37c1c4c760aeaa119352091ca93ca5566f4ad48562c"
+dependencies = [
+ "anyhow",
+ "bitflags 2.9.4",
+ "dirs 6.0.0",
+ "git2",
+ "glob",
+ "log",
+ "thiserror 2.0.17",
+ "wildmatch",
+]
+
+[[package]]
+name = "ssh_format"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24ab31081d1c9097c327ec23550858cb5ffb4af6b866c1ef4d728455f01f3304"
+dependencies = [
+ "bytes",
+ "serde",
+ "ssh_format_error",
+]
+
+[[package]]
+name = "ssh_format_error"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be3c6519de7ca611f71ef7e8a56eb57aa1c818fecb5242d0a0f39c83776c210c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12920,6 +13087,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3369f5ac52d5eb6ab48c6b4ffdc8efbcad6b89c765749064ba298f2c68a16a76"
 
 [[package]]
+name = "thin-vec"
+version = "0.2.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0f7e269b48f0a7dd0146680fa24b50cc67fc0373f086a5b2f99bd084639b482"
+
+[[package]]
 name = "thiserror"
 version = "1.0.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13309,6 +13482,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-io-utility"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d672654d175710e52c7c41f6aec77c62b3c0954e2a7ebce9049d1e94ed7c263"
+dependencies = [
+ "bytes",
+ "tokio",
+]
+
+[[package]]
 name = "tokio-macros"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13350,6 +13533,7 @@ dependencies = [
  "futures-core",
  "futures-io",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]
@@ -13651,6 +13835,17 @@ dependencies = [
  "memchr",
  "nom 8.0.0",
  "petgraph",
+]
+
+[[package]]
+name = "triomphe"
+version = "0.1.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b40688ea6389c8171614b25491f71d4a27946e0c7ce2da1c6de27e25abf1a0ae"
+dependencies = [
+ "arc-swap",
+ "serde",
+ "stable_deref_trait",
 ]
 
 [[package]]
@@ -14133,6 +14328,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
+name = "vec-strings"
+version = "0.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8509489e2a7ee219522238ad45fd370bec6808811ac15ac6b07453804e77659"
+dependencies = [
+ "serde",
+ "thin-vec",
+]
+
+[[package]]
 name = "vec1"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14422,6 +14627,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "onboarding",
  "once_cell",
+ "openssh-sftp-client",
  "ordered-float 3.9.2",
  "os_info",
  "palette",
@@ -14477,6 +14683,7 @@ dependencies = [
  "siphasher 0.3.11",
  "smallvec 1.15.1",
  "smol_str",
+ "ssh2-config",
  "static_assertions",
  "string-offset",
  "strum",
@@ -15813,6 +16020,12 @@ dependencies = [
  "bytemuck",
  "safe_arch",
 ]
+
+[[package]]
+name = "wildmatch"
+version = "2.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29333c3ea1ba8b17211763463ff24ee84e41c78224c16b001cd907e663a38c68"
 
 [[package]]
 name = "win32job"

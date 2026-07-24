@@ -49,6 +49,8 @@ use super::model::{
     EXECUTION_PROFILE_EDITOR_PANE_KIND, MCP_SERVER_PANE_KIND, NOTEBOOK_PANE_KIND,
     SETTINGS_PANE_KIND, TERMINAL_PANE_KIND, WELCOME_PANE_KIND, WORKFLOW_PANE_KIND,
 };
+#[cfg(feature = "sftp")]
+use super::model::SFTP_PANE_KIND;
 use super::schema;
 use super::{
     BlockCompleted, FinishedCommandMetadata, ModelEvent, PersistedData, PersistenceScope,
@@ -1136,6 +1138,8 @@ fn save_pane_state(
         LeafContents::GetStarted => GET_STARTED_PANE_KIND,
         LeafContents::Welcome { .. } => WELCOME_PANE_KIND,
         LeafContents::AIDocument(_) => AI_DOCUMENT_PANE_KIND,
+        #[cfg(feature = "sftp")]
+        LeafContents::Sftp(_) => SFTP_PANE_KIND,
         LeafContents::EnvironmentManagement(_) | LeafContents::NetworkLog => {
             // These pane types are filtered out before this function is
             // called; see `LeafContents::is_persisted` and the skip in
@@ -1373,6 +1377,17 @@ fn save_pane_state(
 
             diesel::insert_into(schema::ambient_agent_panes::dsl::ambient_agent_panes)
                 .values(ambient_agent_pane)
+                .execute(conn)?;
+        }
+        #[cfg(feature = "sftp")]
+        LeafContents::Sftp(snapshot) => {
+            let pane = model::NewSftpPane {
+                id,
+                target: snapshot.target.clone(),
+                remote_path: snapshot.remote_path.clone(),
+            };
+            diesel::insert_into(schema::sftp_panes::dsl::sftp_panes)
+                .values(pane)
                 .execute(conn)?;
         }
         LeafContents::NetworkLog => {
@@ -2681,6 +2696,17 @@ fn read_node(conn: &mut SqliteConnection, node: model::PaneNode) -> Result<PaneN
                     LeafContents::AmbientAgent(AmbientAgentPaneSnapshot {
                         uuid: pane.uuid,
                         task_id,
+                    })
+                }
+                #[cfg(feature = "sftp")]
+                SFTP_PANE_KIND => {
+                    let pane = schema::sftp_panes::dsl::sftp_panes
+                        .find(node.id)
+                        .select(model::SftpPane::as_select())
+                        .first(conn)?;
+                    LeafContents::Sftp(crate::app_state::SftpPaneSnapshot {
+                        target: pane.target,
+                        remote_path: pane.remote_path,
                     })
                 }
                 other => bail!("Unrecognized pane kind: {other}"),

@@ -193,6 +193,8 @@ pub use pane::file_pane::FilePane;
 pub use pane::network_log_pane::NetworkLogPane;
 pub use pane::notebook_pane::NotebookPane;
 pub use pane::settings_pane::SettingsPane;
+#[cfg(feature = "sftp")]
+pub use pane::sftp_pane::SftpPane;
 pub use pane::terminal_pane::TerminalPane;
 pub use pane::workflow_pane::WorkflowPane;
 pub use pane::PaneHeaderAction;
@@ -1923,6 +1925,18 @@ impl PaneGroup {
                 Err(anyhow::anyhow!(
                     "Can't restore execution profile editor panes"
                 ))
+            }
+            #[cfg(feature = "sftp")]
+            LeafContents::Sftp(snapshot) => {
+                let pane: Box<dyn AnyPaneContent + 'static> =
+                    Box::new(SftpPane::from_snapshot(snapshot, ctx));
+                let pane_id = pane.as_pane().id();
+                pane_contents.insert(pane_id, pane);
+                let focus = InitialFocus {
+                    focused_pane: leaf.is_focused.then_some(pane_id),
+                    active_session: None,
+                };
+                Ok((PaneData::new(pane_id), focus))
             }
             LeafContents::NetworkLog => {
                 // Network log panes are intentionally not restored. Two

@@ -288,8 +288,10 @@ http_server.workspace = true
 hyper.workspace = true
 libsqlite3-sys = { version = "0.33.0", features = ["bundled"] }
 mio = { version = "1.1.1", features = ["os-poll", "os-ext"] }
-tokio.workspace = true
-tokio-util.workspace = true
+openssh-sftp-client = { version = "0.15.7", default-features = false, optional = true }
+ssh2-config = { version = "0.7.1", optional = true }
+tokio = { workspace = true, features = ["fs", "io-util", "process", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
 
 # AWS SDK (loading credentials for BYO LLM)
 aws-config = { version = "1.8.16", features = ["credentials-login"], optional = true }
@@ -704,6 +706,7 @@ offline_oss = [
     "skill_arguments",
     "skip_firebase_anonymous_user",
     "solo_user_byok",
+    "sftp",
     "tab_close_button_on_left",
     "tab_configs",
     "tabbed_editor_view",
@@ -828,6 +831,7 @@ personal_cloud_objects = []
 # Remote-backed tty that connects to a PTY-like interface via a server.
 remote_server_support = ["dep:remote_server", "warp_files/remote_server_support"]
 remote_tty = ["remote_server_support"]
+sftp = ["dep:openssh-sftp-client", "dep:ssh2-config"]
 # Fix for cursor reflow bug during window resize, from Alacritty resizing logic.
 resize_fix = []
 pluggable_notifications = []

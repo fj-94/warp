@@ -25,6 +25,8 @@ use crate::code_review::comments::{
     AttachedReviewComment, PendingImportedReviewComment, ReviewCommentBatch,
 };
 use crate::code_review::diff_state::{DiffMode, DiffStateModel};
+#[cfg(feature = "sftp")]
+use crate::sftp_view::SftpView;
 use crate::workspace::view::global_search::view::GlobalSearchView;
 
 /// Type-safe wrapper around the map of `LocalOrRemotePath` → `DiffStateModel`.
@@ -160,12 +162,17 @@ pub struct WorkingDirectoriesModel {
     selected_review_repo: HashMap<EntityId, LocalOrRemotePath>,
     global_search_views: HashMap<EntityId, ViewHandle<GlobalSearchView>>,
     file_tree_views: HashMap<EntityId, ViewHandle<FileTreeView>>,
+    #[cfg(feature = "sftp")]
+    sftp_views: HashMap<EntityId, ViewHandle<SftpView>>,
 }
 
 #[derive(Default)]
 #[cfg(not(feature = "local_fs"))]
-/// Does nothing without a local file system
-pub struct WorkingDirectoriesModel {}
+/// Does nothing without a local file system, except retain per-tab tool views.
+pub struct WorkingDirectoriesModel {
+    #[cfg(feature = "sftp")]
+    sftp_views: HashMap<EntityId, ViewHandle<SftpView>>,
+}
 
 /// Index Sets are ordered by insertion order. This function updates an index set to match a new set of items.
 #[cfg(feature = "local_fs")]
@@ -430,6 +437,16 @@ impl WorkingDirectoriesModel {
         self.file_tree_views.get(&pane_group_id).cloned()
     }
 
+    #[cfg(feature = "sftp")]
+    pub fn store_sftp_view(&mut self, pane_group_id: EntityId, view: ViewHandle<SftpView>) {
+        self.sftp_views.insert(pane_group_id, view);
+    }
+
+    #[cfg(feature = "sftp")]
+    pub fn get_sftp_view(&self, pane_group_id: EntityId) -> Option<ViewHandle<SftpView>> {
+        self.sftp_views.get(&pane_group_id).cloned()
+    }
+
     /// Permanently removes all state associated with a pane group.
     /// This should be called when a tab is closed (pane group is destroyed),
     /// as opposed to handle_empty_pane_group which is called when working directories
@@ -442,6 +459,10 @@ impl WorkingDirectoriesModel {
         // but need to be removed when the pane group is destroyed
         self.global_search_views.remove(&pane_group_id);
         self.file_tree_views.remove(&pane_group_id);
+        #[cfg(feature = "sftp")]
+        if let Some(view) = self.sftp_views.remove(&pane_group_id) {
+            view.update(ctx, |view, _ctx| view.shutdown());
+        }
         self.code_review_views.remove(&pane_group_id);
         self.focused_repo.remove(&pane_group_id);
         self.selected_review_repo.remove(&pane_group_id);
@@ -935,7 +956,24 @@ impl WorkingDirectoriesModel {
         None
     }
 
-    pub fn remove_pane_group(&mut self, _pane_group_id: EntityId, _ctx: &mut ModelContext<Self>) {}
+    #[cfg(feature = "sftp")]
+    pub fn store_sftp_view(&mut self, pane_group_id: EntityId, view: ViewHandle<SftpView>) {
+        self.sftp_views.insert(pane_group_id, view);
+    }
+
+    #[cfg(feature = "sftp")]
+    pub fn get_sftp_view(&self, pane_group_id: EntityId) -> Option<ViewHandle<SftpView>> {
+        self.sftp_views.get(&pane_group_id).cloned()
+    }
+
+    pub fn remove_pane_group(&mut self, pane_group_id: EntityId, ctx: &mut ModelContext<Self>) {
+        #[cfg(feature = "sftp")]
+        if let Some(view) = self.sftp_views.remove(&pane_group_id) {
+            view.update(ctx, |view, _ctx| view.shutdown());
+        }
+        #[cfg(not(feature = "sftp"))]
+        let _ = (pane_group_id, ctx);
+    }
 
     pub(crate) fn insert_code_review_comments(
         &mut self,

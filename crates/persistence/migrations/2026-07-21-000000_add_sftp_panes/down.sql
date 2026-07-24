@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS sftp_panes;

@@ -1,5 +1,6 @@
 use super::*;
 use crate::elements::DispatchEventResult;
+use crate::event::ModifiersState;
 use crate::r#async::Timer;
 use crate::{
     elements::{
@@ -40,6 +41,7 @@ struct View {
     mouse_ups: HashMap<ElementIdentifier, usize>,
     hover_ins: HashMap<ElementIdentifier, usize>,
     hover_outs: HashMap<ElementIdentifier, usize>,
+    click_modifiers: Option<ModifiersState>,
     bottom_mouse_state: MouseStateHandle,
     top_mouse_state: MouseStateHandle,
 
@@ -57,6 +59,10 @@ pub fn init(app: &mut AppContext) {
     app.add_action("hoverable_test:mouse_up", View::mouse_up);
     app.add_action("hoverable_test:hover_in", View::hover_in);
     app.add_action("hoverable_test:hover_out", View::hover_out);
+    app.add_action(
+        "hoverable_test:click_modifiers",
+        View::record_click_modifiers,
+    );
 }
 
 impl View {
@@ -98,6 +104,15 @@ impl View {
         true
     }
 
+    fn record_click_modifiers(
+        &mut self,
+        modifiers: &ModifiersState,
+        _: &mut ViewContext<Self>,
+    ) -> bool {
+        self.click_modifiers = Some(*modifiers);
+        true
+    }
+
     fn num_hover_in_events(&self, identifier: &ElementIdentifier) -> usize {
         *self.hover_ins.get(identifier).unwrap_or(&0)
     }
@@ -132,11 +147,12 @@ impl crate::core::View for View {
                     .with_width(25.)
                     .finish()
             })
-            .on_click(|evt, _, _| {
+            .on_click_with_modifiers(|evt, _, _, modifiers| {
                 evt.dispatch_action(
                     "hoverable_test:mouse_down",
                     ElementIdentifier::HoverableElementBottomLeft,
                 );
+                evt.dispatch_action("hoverable_test:click_modifiers", modifiers);
             })
             .on_hover(|hovered, evt, _, _| {
                 let action_name = if hovered {
@@ -267,7 +283,11 @@ fn test_hoverable_element_click_handling() {
             ctx.simulate_window_event(
                 Event::LeftMouseUp {
                     position: vec2f(10., 90.),
-                    modifiers: Default::default(),
+                    modifiers: ModifiersState {
+                        ctrl: true,
+                        shift: true,
+                        ..Default::default()
+                    },
                 },
                 window_id,
                 presenter.clone(),
@@ -327,6 +347,9 @@ fn test_hoverable_element_click_handling() {
                     .get(&ElementIdentifier::HoverableElementBottomLeft)
                     .unwrap()
             );
+            let modifiers = view.click_modifiers.expect("click modifiers were recorded");
+            assert!(modifiers.ctrl);
+            assert!(modifiers.shift);
             assert_eq!(
                 1,
                 *view.mouse_ups.get(&ElementIdentifier::BottomStack).unwrap()

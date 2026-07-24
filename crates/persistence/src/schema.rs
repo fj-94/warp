@@ -355,6 +355,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    sftp_panes (id) {
+        id -> Integer,
+        target -> Nullable<Text>,
+        remote_path -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     tabs (id) {
         id -> Integer,
         window_id -> Integer,
@@ -509,6 +517,7 @@ diesel::joinable!(pane_branches -> pane_nodes (pane_node_id));
 diesel::joinable!(pane_leaves -> pane_nodes (pane_node_id));
 diesel::joinable!(pane_nodes -> tabs (tab_id));
 diesel::joinable!(panels -> tabs (tab_id));
+diesel::joinable!(sftp_panes -> pane_nodes (id));
 diesel::joinable!(tabs -> windows (window_id));
 diesel::joinable!(team_members -> teams (team_id));
 diesel::joinable!(team_settings -> teams (team_id));
@@ -521,6 +530,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     pane_leaves,
     pane_nodes,
     panels,
+    sftp_panes,
     tabs,
     windows,
 );

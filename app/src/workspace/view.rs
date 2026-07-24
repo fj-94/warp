@@ -3880,6 +3880,16 @@ impl Workspace {
                 },
                 LeftPanelDisplayedTab::WarpDrive => ToolPanelView::WarpDrive,
                 LeftPanelDisplayedTab::ConversationListView => ToolPanelView::ConversationListView,
+                LeftPanelDisplayedTab::Sftp => {
+                    #[cfg(feature = "sftp")]
+                    {
+                        ToolPanelView::Sftp
+                    }
+                    #[cfg(not(feature = "sftp"))]
+                    {
+                        ToolPanelView::WarpDrive
+                    }
+                }
             };
             lp.restore_active_view_from_snapshot(active_view, ctx);
             lp.set_active_pane_group(pane_group.clone(), &self.working_directories_model, ctx);
@@ -13248,6 +13258,20 @@ impl Workspace {
         });
     }
 
+    #[cfg(feature = "sftp")]
+    pub(crate) fn open_sftp_pane(&mut self, ctx: &mut ViewContext<Self>) {
+        self.open_sftp_for_tab(self.active_tab_index, ctx);
+    }
+
+    #[cfg(feature = "sftp")]
+    fn open_sftp_for_tab(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+        if index >= self.tab_count() {
+            return;
+        }
+        self.activate_tab(index, ctx);
+        self.open_left_panel_view(&LeftPanelAction::Sftp, ctx);
+    }
+
     fn show_handoff_environment_creation_modal(&mut self, ctx: &mut ViewContext<Self>) {
         // Capture the initiating source view now, before async creation begins.
         // If we waited until the Created callback, the user may have switched panes.
@@ -17935,6 +17959,8 @@ impl Workspace {
                         ToolPanelView::GlobalSearch { .. } => "Global search",
                         ToolPanelView::WarpDrive => "Warp Drive",
                         ToolPanelView::ConversationListView => "Agent conversations",
+                        #[cfg(feature = "sftp")]
+                        ToolPanelView::Sftp => "SFTP",
                     }
                 } else {
                     "Tools panel"
@@ -17989,6 +18015,8 @@ impl Workspace {
                 ToolPanelView::GlobalSearch { .. } => "Global search",
                 ToolPanelView::WarpDrive => "Warp Drive",
                 ToolPanelView::ConversationListView => "Agent conversations",
+                #[cfg(feature = "sftp")]
+                ToolPanelView::Sftp => "SFTP",
             }
         } else {
             "Tools panel"
@@ -20850,6 +20878,8 @@ impl Workspace {
         if WarpDriveSettings::is_warp_drive_enabled(ctx) {
             views.push(ToolPanelView::WarpDrive);
         }
+        #[cfg(feature = "sftp")]
+        views.push(ToolPanelView::Sftp);
         views
     }
 
@@ -21248,6 +21278,14 @@ impl TypedActionView for Workspace {
             }
             OpenNetworkLogPane => {
                 self.open_network_log_pane(ctx);
+            }
+            #[cfg(feature = "sftp")]
+            OpenSftpPane => {
+                self.open_sftp_pane(ctx);
+            }
+            #[cfg(feature = "sftp")]
+            OpenSftpForTab(index) => {
+                self.open_sftp_for_tab(*index, ctx);
             }
             FixSettingsWithOz { error_description } => {
                 use crate::ai::skills::SkillManager;

@@ -24,6 +24,8 @@ pub(super) mod local_harness_launch;
 pub(super) mod network_log_pane;
 pub(super) mod notebook_pane;
 pub(super) mod settings_pane;
+#[cfg(feature = "sftp")]
+pub(super) mod sftp_pane;
 pub(super) mod terminal_pane;
 pub mod view;
 pub(super) mod welcome_pane;
@@ -34,6 +36,8 @@ use std::{any::Any, fmt::Display};
 
 use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::pane_group::pane::get_started_view::GetStartedView;
+#[cfg(feature = "sftp")]
+use crate::sftp_view::SftpView;
 use crate::view_components::action_button::ActionButton;
 use crate::{
     ai::execution_profiles::editor::ExecutionProfileEditorView,
@@ -150,6 +154,8 @@ pub(crate) enum IPaneType {
     ExecutionProfileEditor,
     GetStarted,
     NetworkLog,
+    #[cfg(feature = "sftp")]
+    Sftp,
     Welcome,
     DeferredPlaceholder,
     /// A pane type only for tests.
@@ -174,6 +180,8 @@ impl Display for IPaneType {
             IPaneType::ExecutionProfileEditor => write!(f, "Execution Profile Editor"),
             IPaneType::GetStarted => write!(f, "GetStarted"),
             IPaneType::NetworkLog => write!(f, "Network Log"),
+            #[cfg(feature = "sftp")]
+            IPaneType::Sftp => write!(f, "SFTP"),
             IPaneType::Welcome => write!(f, "Welcome"),
             IPaneType::DeferredPlaceholder => write!(f, "Placeholder"),
             #[cfg(test)]
@@ -276,6 +284,11 @@ impl PaneId {
         Self::new_from_ctx(IPaneType::NetworkLog, ctx)
     }
 
+    #[cfg(feature = "sftp")]
+    pub fn from_sftp_pane_ctx(ctx: &ViewContext<PaneView<SftpView>>) -> Self {
+        Self::new_from_ctx(IPaneType::Sftp, ctx)
+    }
+
     /// Creates a [`PaneId`] from a [`PaneView<TerminalView>`] entity ID.
     pub fn from_terminal_pane_view(
         terminal_pane_view: &ViewHandle<terminal_pane::TerminalPaneView>,
@@ -375,6 +388,11 @@ impl PaneId {
         network_log_pane_view: &ViewHandle<PaneView<NetworkLogView>>,
     ) -> Self {
         Self::new(IPaneType::NetworkLog, network_log_pane_view)
+    }
+
+    #[cfg(feature = "sftp")]
+    pub fn from_sftp_pane_view(sftp_pane_view: &ViewHandle<PaneView<SftpView>>) -> Self {
+        Self::new(IPaneType::Sftp, sftp_pane_view)
     }
 
     #[cfg_attr(not(feature = "local_fs"), allow(dead_code))]
@@ -491,6 +509,10 @@ impl PaneId {
             }
             IPaneType::NetworkLog => {
                 ChildView::<PaneView<NetworkLogView>>::with_id(self.0.pane_view_id).finish()
+            }
+            #[cfg(feature = "sftp")]
+            IPaneType::Sftp => {
+                ChildView::<PaneView<SftpView>>::with_id(self.0.pane_view_id).finish()
             }
             IPaneType::Welcome => {
                 ChildView::<PaneView<WelcomeView>>::with_id(self.0.pane_view_id).finish()

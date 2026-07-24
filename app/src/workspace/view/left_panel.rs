@@ -5,15 +5,15 @@ use warp_core::ui::theme::color::internal_colors;
 use warp_core::{send_telemetry_from_ctx, ui::Icon};
 use warp_util::path::LineAndColumnArg;
 use warpui::{
-    AppContext, Entity, FocusContext, ModelHandle, SingletonEntity, TypedActionView, View,
-    ViewContext, ViewHandle, WeakViewHandle,
     elements::{
-        ChildView, ConstrainedBox, Container, CrossAxisAlignment, DragBarSide, Element, Empty,
-        Flex, MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement, Resizable,
-        ResizableStateHandle, Shrinkable, resizable_state_handle,
+        resizable_state_handle, ChildView, ConstrainedBox, Container, CrossAxisAlignment,
+        DragBarSide, Element, Empty, Flex, MainAxisAlignment, MainAxisSize, MouseStateHandle,
+        ParentElement, Resizable, ResizableStateHandle, Shrinkable,
     },
     platform::Cursor,
     ui_components::components::{Coords, UiComponent, UiComponentStyles},
+    AppContext, Entity, FocusContext, ModelHandle, SingletonEntity, TypedActionView, View,
+    ViewContext, ViewHandle, WeakViewHandle,
 };
 
 use crate::ai::agent::conversation::AIConversationId;
@@ -24,16 +24,22 @@ use crate::code::file_tree::FileTreeEvent;
 use crate::coding_panel_enablement_state::CodingPanelEnablementState;
 use crate::drive::panel::{DrivePanel, DrivePanelEvent};
 use crate::pane_group::working_directories::WorkingDirectory;
+#[cfg(feature = "sftp")]
+use crate::pane_group::Event as PaneGroupEvent;
 use crate::pane_group::{PaneGroup, WorkingDirectoriesEvent, WorkingDirectoriesModel};
 #[cfg(feature = "local_fs")]
 use crate::server::telemetry::CodePanelsFileOpenEntrypoint;
 use crate::server::telemetry::{FileTreeSource, WarpDriveSource};
 use crate::settings_view::keybindings::{KeybindingChangedEvent, KeybindingChangedNotifier};
+#[cfg(feature = "sftp")]
+use crate::sftp_view::{SftpView, SftpViewEvent};
 #[cfg(feature = "local_fs")]
 use crate::util::file::external_editor::EditorSettings;
-use crate::util::openable_file_type::FileTarget;
 #[cfg(feature = "local_fs")]
 use crate::util::openable_file_type::resolve_file_target_with_editor_choice;
+#[cfg(all(feature = "sftp", feature = "local_fs"))]
+use crate::util::openable_file_type::EditorLayout;
+use crate::util::openable_file_type::FileTarget;
 use crate::workspace::view::conversation_list::view::{
     ConversationListView, Event as ConversationListViewEvent,
 };
@@ -47,11 +53,10 @@ use crate::workspace::view::{
     TOGGLE_PROJECT_EXPLORER_BINDING_NAME, TOGGLE_WARP_DRIVE_BINDING_NAME,
 };
 use crate::{
-    TelemetryEvent,
     appearance::Appearance,
     code::file_tree::FileTreeView,
     drive::panel::{MAX_SIDEBAR_WIDTH_RATIO, MIN_SIDEBAR_WIDTH},
-    pane_group::pane::view::header::{PANE_HEADER_HEIGHT, components::HEADER_EDGE_PADDING},
+    pane_group::pane::view::header::{components::HEADER_EDGE_PADDING, PANE_HEADER_HEIGHT},
     pane_group::{self},
     terminal::resizable_data::{ModalType, ResizableData},
     ui_components::{
@@ -60,6 +65,7 @@ use crate::{
     },
     util::bindings::keybinding_name_to_display_string,
     workspace::WorkspaceAction,
+    TelemetryEvent,
 };
 
 #[derive(Default)]
@@ -68,14 +74,20 @@ struct MouseStateHandles {
     global_search_button: MouseStateHandle,
     warp_drive_button: MouseStateHandle,
     conversation_list_view_button: MouseStateHandle,
+    #[cfg(feature = "sftp")]
+    sftp_button: MouseStateHandle,
 }
 
 #[derive(Clone, Debug)]
 pub enum LeftPanelAction {
     ProjectExplorer,
-    GlobalSearch { entry_focus: GlobalSearchEntryFocus },
+    GlobalSearch {
+        entry_focus: GlobalSearchEntryFocus,
+    },
     WarpDrive,
     ConversationListView,
+    #[cfg(feature = "sftp")]
+    Sftp,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -100,9 +112,13 @@ pub enum LeftPanelEvent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolPanelView {
     ProjectExplorer,
-    GlobalSearch { entry_focus: GlobalSearchEntryFocus },
+    GlobalSearch {
+        entry_focus: GlobalSearchEntryFocus,
+    },
     WarpDrive,
     ConversationListView,
+    #[cfg(feature = "sftp")]
+    Sftp,
 }
 
 /// Encapsulates the active view state to enforce that all mutations go through
@@ -142,6 +158,12 @@ mod active_view_state {
         }
 
         left_panel.update_active_file_tree_subscription_state(ctx);
+
+        #[cfg(feature = "sftp")]
+        if new_view == ToolPanelView::Sftp {
+            left_panel.ensure_active_sftp_view(ctx);
+            left_panel.maybe_auto_connect_active_sftp(ctx);
+        }
     }
 }
 
@@ -172,6 +194,8 @@ pub struct LeftPanelView {
     active_view: active_view_state::ActiveViewState,
     toolbelt_buttons: Vec<ToolbeltButtonConfig>,
     active_pane_group: Option<WeakViewHandle<PaneGroup>>,
+    #[cfg(feature = "sftp")]
+    sftp_subscribed_pane_groups: HashSet<warpui::EntityId>,
     #[cfg_attr(not(feature = "local_fs"), allow(dead_code))]
     working_directories_model: ModelHandle<WorkingDirectoriesModel>,
     is_agent_management_view_open: bool,
@@ -313,6 +337,8 @@ impl LeftPanelView {
             active_view: active_view_state::new(active_view),
             toolbelt_buttons,
             active_pane_group: None,
+            #[cfg(feature = "sftp")]
+            sftp_subscribed_pane_groups: HashSet::new(),
             working_directories_model,
             is_agent_management_view_open: false,
             panel_position: super::PanelPosition::Left,
@@ -442,7 +468,112 @@ impl LeftPanelView {
                     tooltip_keybinding_names,
                 }
             }
+            #[cfg(feature = "sftp")]
+            ToolPanelView::Sftp => ToolbeltButtonConfig {
+                icon: Icon::Globe,
+                active_icon: None,
+                tooltip_text: "SFTP".to_string(),
+                action: LeftPanelAction::Sftp,
+                render_with_active_state: false,
+                tooltip_keybinding_names: vec![],
+                tooltip_keybinding: None,
+            },
         }
+    }
+
+    #[cfg(feature = "sftp")]
+    fn get_or_create_sftp_view_for_pane_group(
+        &mut self,
+        pane_group: &ViewHandle<PaneGroup>,
+        ctx: &mut ViewContext<Self>,
+    ) -> ViewHandle<SftpView> {
+        let pane_group_id = pane_group.id();
+        if let Some(view) = self
+            .working_directories_model
+            .as_ref(ctx)
+            .get_sftp_view(pane_group_id)
+        {
+            return view;
+        }
+
+        let sftp_view = ctx.add_typed_action_view(SftpView::new);
+        ctx.subscribe_to_view(&sftp_view, |_panel, _, event, ctx| match event {
+            SftpViewEvent::Pane(_) => {}
+            #[cfg(feature = "local_fs")]
+            SftpViewEvent::OpenFile(path) => {
+                ctx.emit(LeftPanelEvent::OpenFileWithTarget {
+                    location: LocalOrRemotePath::Local(path.clone()),
+                    target: FileTarget::CodeEditor(EditorLayout::SplitPane),
+                    line_col: None,
+                });
+            }
+        });
+        self.working_directories_model.update(ctx, |model, _ctx| {
+            model.store_sftp_view(pane_group_id, sftp_view.clone());
+        });
+        sftp_view
+    }
+
+    #[cfg(feature = "sftp")]
+    fn maybe_auto_connect_sftp_for_pane_group(
+        &mut self,
+        pane_group: &ViewHandle<PaneGroup>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let is_active_pane_group = self
+            .active_pane_group
+            .as_ref()
+            .and_then(|active| active.upgrade(ctx))
+            .is_some_and(|active| active.id() == pane_group.id());
+        if !is_active_pane_group
+            || self.active_view.get() != ToolPanelView::Sftp
+            || !pane_group.as_ref(ctx).left_panel_open
+        {
+            return;
+        }
+
+        let Some(target) = pane_group
+            .as_ref(ctx)
+            .active_session_view(ctx)
+            .and_then(|terminal| terminal.as_ref(ctx).active_session_sftp_target(ctx))
+        else {
+            return;
+        };
+        let view = self.get_or_create_sftp_view_for_pane_group(pane_group, ctx);
+        view.update(ctx, |view, ctx| view.connect_to_target(target, ctx));
+    }
+
+    #[cfg(feature = "sftp")]
+    fn maybe_auto_connect_active_sftp(&mut self, ctx: &mut ViewContext<Self>) {
+        let Some(pane_group) = self
+            .active_pane_group
+            .as_ref()
+            .and_then(|pane_group| pane_group.upgrade(ctx))
+        else {
+            return;
+        };
+        self.maybe_auto_connect_sftp_for_pane_group(&pane_group, ctx);
+    }
+
+    #[cfg(feature = "sftp")]
+    fn active_sftp_view(&self, app: &AppContext) -> Option<ViewHandle<SftpView>> {
+        let pane_group_id = self
+            .active_pane_group
+            .as_ref()
+            .and_then(|pane_group| pane_group.upgrade(app))
+            .map(|pane_group| pane_group.id())?;
+        self.working_directories_model
+            .as_ref(app)
+            .get_sftp_view(pane_group_id)
+    }
+
+    #[cfg(feature = "sftp")]
+    fn ensure_active_sftp_view(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) -> Option<ViewHandle<SftpView>> {
+        let pane_group = self.active_pane_group.as_ref()?.upgrade(ctx)?;
+        Some(self.get_or_create_sftp_view_for_pane_group(&pane_group, ctx))
     }
 
     fn get_or_create_global_search_view_for_pane_group(
@@ -575,6 +706,18 @@ impl LeftPanelView {
 
         self.active_pane_group = Some(pane_group.downgrade());
 
+        #[cfg(feature = "sftp")]
+        if self.sftp_subscribed_pane_groups.insert(pane_group_id) {
+            ctx.subscribe_to_view(&pane_group, |panel, pane_group, event, ctx| {
+                if matches!(
+                    event,
+                    PaneGroupEvent::ActiveSessionChanged | PaneGroupEvent::TerminalViewStateChanged
+                ) {
+                    panel.maybe_auto_connect_sftp_for_pane_group(&pane_group, ctx);
+                }
+            });
+        }
+
         if let Some(previous_pane_group_id) = previous_pane_group_id {
             if previous_pane_group_id != pane_group_id {
                 self.deactivate_file_tree_view_for_pane_group(previous_pane_group_id, ctx);
@@ -621,6 +764,9 @@ impl LeftPanelView {
                 view.auto_expand_to_most_recent_directory(ctx);
             }
         });
+
+        #[cfg(feature = "sftp")]
+        self.maybe_auto_connect_sftp_for_pane_group(&pane_group, ctx);
 
         self.on_left_panel_visibility_changed(left_panel_open, ctx);
 
@@ -683,6 +829,12 @@ impl LeftPanelView {
                 self.conversation_list_view.update(ctx, |view, ctx| {
                     view.on_left_panel_focused(ctx);
                 });
+            }
+            #[cfg(feature = "sftp")]
+            ToolPanelView::Sftp => {
+                if let Some(view) = self.ensure_active_sftp_view(ctx) {
+                    view.update(ctx, |view, ctx| view.focus(ctx));
+                }
             }
         }
     }
@@ -836,6 +988,8 @@ impl LeftPanelView {
                 LeftPanelAction::ConversationListView => {
                     self.active_view.get() == ToolPanelView::ConversationListView
                 }
+                #[cfg(feature = "sftp")]
+                LeftPanelAction::Sftp => self.active_view.get() == ToolPanelView::Sftp,
             };
         }
     }
@@ -977,12 +1131,25 @@ impl LeftPanelView {
                 active_view_state::set(self, ToolPanelView::ConversationListView, ctx);
                 send_telemetry_from_ctx!(TelemetryEvent::ConversationListViewOpened, ctx);
             }
+            #[cfg(feature = "sftp")]
+            LeftPanelAction::Sftp => {
+                active_view_state::set(self, ToolPanelView::Sftp, ctx);
+            }
         }
     }
 
-    pub fn on_left_panel_visibility_changed(&self, is_now_open: bool, ctx: &mut ViewContext<Self>) {
+    pub fn on_left_panel_visibility_changed(
+        &mut self,
+        is_now_open: bool,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if ToolPanelView::ConversationListView == self.active_view.get() {
             self.on_conversation_list_view_visibility_changed(is_now_open, ctx);
+        }
+
+        #[cfg(feature = "sftp")]
+        if is_now_open {
+            self.maybe_auto_connect_active_sftp(ctx);
         }
 
         self.update_active_file_tree_subscription_state(ctx);
@@ -1076,6 +1243,12 @@ impl View for LeftPanelView {
                 }
                 ToolPanelView::WarpDrive => ctx.focus(&self.warp_drive_view),
                 ToolPanelView::ConversationListView => ctx.focus(&self.conversation_list_view),
+                #[cfg(feature = "sftp")]
+                ToolPanelView::Sftp => {
+                    if let Some(view) = self.ensure_active_sftp_view(ctx) {
+                        ctx.focus(&view);
+                    }
+                }
             }
         }
     }
@@ -1090,6 +1263,8 @@ impl View for LeftPanelView {
             self.mouse_state_handles
                 .conversation_list_view_button
                 .clone(),
+            #[cfg(feature = "sftp")]
+            self.mouse_state_handles.sftp_button.clone(),
         ];
 
         // If there is only one button in the toolbelt row,
@@ -1147,6 +1322,14 @@ impl View for LeftPanelView {
             .finish(),
             ToolPanelView::ConversationListView => {
                 Shrinkable::new(1.0, ChildView::new(&self.conversation_list_view).finish()).finish()
+            }
+            #[cfg(feature = "sftp")]
+            ToolPanelView::Sftp => {
+                if let Some(view) = self.active_sftp_view(app) {
+                    Shrinkable::new(1.0, ChildView::new(&view).finish()).finish()
+                } else {
+                    Shrinkable::new(1.0, Container::new(Empty::new().finish()).finish()).finish()
+                }
             }
         };
 

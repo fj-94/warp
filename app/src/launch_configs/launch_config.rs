@@ -162,6 +162,8 @@ impl TryFrom<PaneNodeSnapshot> for PaneTemplateType {
                     // TODO: Handle AIDocument in launch config
                     Err(())
                 }
+                #[cfg(feature = "sftp")]
+                LeafContents::Sftp(_) => Err(()),
             },
         }
     }

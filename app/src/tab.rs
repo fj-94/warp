@@ -194,6 +194,7 @@ impl TabData {
         for section_items in [
             self.session_sharing_menu_items(index, ctx),
             self.copy_metadata_menu_items(pane_name_target, ctx),
+            self.sftp_menu_items(index),
             self.modify_tab_menu_items(index, tabs_len, pane_name_target, ctx),
             self.close_tab_menu_items(index, tabs_len, ctx),
             Self::save_config_menu_items(index),
@@ -208,6 +209,20 @@ impl TabData {
             menu_items.extend(section_items);
         }
         menu_items
+    }
+
+    fn sftp_menu_items(&self, index: usize) -> Vec<MenuItem<WorkspaceAction>> {
+        #[cfg(feature = "sftp")]
+        {
+            vec![MenuItemFields::new("Open SFTP")
+                .with_on_select_action(WorkspaceAction::OpenSftpForTab(index))
+                .into_item()]
+        }
+        #[cfg(not(feature = "sftp"))]
+        {
+            let _ = index;
+            vec![]
+        }
     }
 
     fn session_sharing_menu_items(

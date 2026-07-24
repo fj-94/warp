@@ -28,6 +28,9 @@ use super::{
     save_codebase_index_metadata, setup_database, start_writer,
 };
 
+#[cfg(feature = "sftp")]
+use crate::app_state::SftpPaneSnapshot;
+
 #[test]
 fn app_scope_database_path_matches_app_database_path() {
     assert_eq!(
@@ -120,6 +123,46 @@ fn sqlite_read_restores_app_state_and_codebase_metadata() {
     assert_eq!(restored.app_state.windows.len(), 1);
     assert_eq!(restored.codebase_indices.len(), 1);
     assert_eq!(restored.codebase_indices[0].path, metadata.path);
+}
+
+#[cfg(feature = "sftp")]
+#[test]
+fn sqlite_round_trips_sftp_pane_state() {
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let database_path = tempdir.path().join("warp.sqlite");
+    let mut conn = setup_database(&database_path).expect("database should initialize");
+    let mut window = test_terminal_window_snapshot(false);
+    window.tabs[0].root = PaneNodeSnapshot::Leaf(LeafSnapshot {
+        is_focused: true,
+        custom_vertical_tabs_title: None,
+        contents: LeafContents::Sftp(SftpPaneSnapshot {
+            target: Some("production".to_string()),
+            remote_path: Some("/srv/releases".to_string()),
+        }),
+    });
+    let app_state = AppState {
+        windows: vec![window],
+        active_window_index: Some(0),
+        block_lists: Default::default(),
+        running_mcp_servers: Default::default(),
+    };
+
+    save_app_state(&mut conn, &app_state).expect("app state should save");
+    let restored = read_sqlite_data(&mut conn, None)
+        .expect("app state should load")
+        .app_state;
+
+    let PaneNodeSnapshot::Leaf(LeafSnapshot { contents, .. }) = &restored.windows[0].tabs[0].root
+    else {
+        panic!("expected SFTP pane leaf");
+    };
+    assert_eq!(
+        contents,
+        &LeafContents::Sftp(SftpPaneSnapshot {
+            target: Some("production".to_string()),
+            remote_path: Some("/srv/releases".to_string()),
+        })
+    );
 }
 
 #[test]

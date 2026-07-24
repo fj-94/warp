@@ -92,6 +92,10 @@ mod safe_triangle;
 mod search_bar;
 mod server;
 mod session_management;
+#[cfg(feature = "sftp")]
+mod sftp;
+#[cfg(feature = "sftp")]
+mod sftp_view;
 mod shell_indicator;
 mod suggestions;
 mod system;

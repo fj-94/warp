@@ -703,6 +703,12 @@ pub enum WorkspaceAction {
     /// Opens (or focuses) the in-app network log pane as a right-split of the
     /// active pane group. Gated on `ContextFlag::NetworkLogConsole`.
     OpenNetworkLogPane,
+    #[cfg(feature = "sftp")]
+    /// Opens the active tab's SFTP file manager in the tools panel.
+    OpenSftpPane,
+    #[cfg(feature = "sftp")]
+    /// Activates a tab and opens its SFTP file manager in the tools panel.
+    OpenSftpForTab(usize),
 }
 
 impl From<&WorkspaceAction> for LoginGatedFeature {
@@ -977,6 +983,8 @@ impl WorkspaceAction {
             | ShowCloudModeV2EnvironmentCreationModal
             | OpenCreateAuthSecretModal { .. }
             | OpenNetworkLogPane => false,
+            #[cfg(feature = "sftp")]
+            OpenSftpPane | OpenSftpForTab(_) => false,
             #[cfg(debug_assertions)]
             ShowHoaOnboardingFlow => false,
             #[cfg(target_family = "wasm")]
