@@ -57,13 +57,25 @@ impl PaneContent for SftpPane {
 
         let sftp_view = self.sftp_view(ctx);
         let pane_id = self.id();
-        ctx.subscribe_to_view(&sftp_view, move |pane_group, _, event, ctx| match event {
-            SftpViewEvent::Pane(pane_event) => {
-                pane_group.handle_pane_event(pane_id, pane_event, ctx)
-            }
-            #[cfg(feature = "local_fs")]
-            SftpViewEvent::OpenFile(_) => {}
-        });
+        ctx.subscribe_to_view(
+            &sftp_view,
+            move |pane_group, sftp_view, event, ctx| match event {
+                SftpViewEvent::Pane(pane_event) => {
+                    pane_group.handle_pane_event(pane_id, pane_event, ctx)
+                }
+                SftpViewEvent::ConnectRequested => {
+                    let target = pane_group
+                        .active_session_view(ctx)
+                        .and_then(|terminal| terminal.as_ref(ctx).active_session_sftp_target(ctx));
+                    sftp_view.update(ctx, |view, ctx| {
+                        view.set_current_tab_target(target);
+                        view.connect_from_editor(ctx);
+                    });
+                }
+                #[cfg(feature = "local_fs")]
+                SftpViewEvent::OpenFile(_) => {}
+            },
+        );
         ctx.subscribe_to_view(&self.view, move |group, _, event, ctx| {
             group.handle_pane_view_event(pane_id, event, ctx);
         });

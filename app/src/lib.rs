@@ -1039,8 +1039,7 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
         use warpui::platform::windows::AppBuilderExt;
         app_builder.set_app_user_model_id(ChannelState::app_id().to_string());
 
-        // Only use DXC for DirectX shader compilation if we're not running in a Parallels VM
-        // Parallels VMs can have issues with DXC shader compilation
+        // Parallels VMs can have issues with DXC shader compilation.
         let is_parallels_vm = crate::util::vm_detection::is_running_in_windows_parallels_vm();
         if !is_parallels_vm {
             log::info!("Using DXC for DirectX shader compilation");
@@ -1449,11 +1448,14 @@ pub(crate) fn initialize_app(
 
     ctx.add_singleton_model(|_ctx| SyncedInputState::new());
 
-    #[cfg(feature = "remote_server_support")]
     {
         ctx.add_singleton_model(remote_server::manager::RemoteServerManager::new);
         #[cfg(not(target_family = "wasm"))]
         ctx.add_singleton_model(remote_server::codebase_index_model::RemoteCodebaseIndexModel::new);
+    }
+
+    #[cfg(feature = "remote_server_support")]
+    {
         #[cfg(not(target_family = "wasm"))]
         remote_server::wire_auth_token_rotation(ctx);
     }

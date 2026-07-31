@@ -1581,6 +1581,8 @@ impl PaneGroup {
             LeafContents::Terminal(terminal_snapshot) => {
                 let uuid = PaneUuid(terminal_snapshot.uuid.clone());
                 let block_list = block_lists.get(&uuid);
+                #[cfg(feature = "sftp")]
+                let remote_reconnect_command = terminal_snapshot.remote_reconnect_command.clone();
 
                 let chosen_shell = terminal_snapshot
                     .shell_launch_data
@@ -1651,6 +1653,11 @@ impl PaneGroup {
                     terminal_snapshot.input_config,
                     ctx,
                 );
+
+                #[cfg(feature = "sftp")]
+                terminal_view.update(ctx, |terminal, _ctx| {
+                    terminal.set_remote_reconnect_command(remote_reconnect_command);
+                });
 
                 let terminal_view_id = terminal_view.id();
 
@@ -2152,6 +2159,7 @@ impl PaneGroup {
                             active_profile_id: None,
                             conversation_ids_to_restore: Vec::new(),
                             active_conversation_id: None,
+                            remote_reconnect_command: None,
                         })
                     }
                 };

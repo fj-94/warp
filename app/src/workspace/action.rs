@@ -709,6 +709,15 @@ pub enum WorkspaceAction {
     #[cfg(feature = "sftp")]
     /// Activates a tab and opens its SFTP file manager in the tools panel.
     OpenSftpForTab(usize),
+    #[cfg(feature = "sftp")]
+    /// Activates a tab, opens its SFTP file manager, and forces a new connection.
+    ReconnectSftpForTab(usize),
+    #[cfg(feature = "sftp")]
+    /// Activates a remote tab and reconnects its terminal session.
+    ReconnectRemoteTab(usize),
+    #[cfg(feature = "sftp")]
+    /// Opens a new terminal tab and reconnects using the selected tab's SSH command.
+    DuplicateRemoteTab(usize),
 }
 
 impl From<&WorkspaceAction> for LoginGatedFeature {
@@ -984,7 +993,11 @@ impl WorkspaceAction {
             | OpenCreateAuthSecretModal { .. }
             | OpenNetworkLogPane => false,
             #[cfg(feature = "sftp")]
-            OpenSftpPane | OpenSftpForTab(_) => false,
+            OpenSftpPane
+            | OpenSftpForTab(_)
+            | ReconnectSftpForTab(_)
+            | ReconnectRemoteTab(_)
+            | DuplicateRemoteTab(_) => false,
             #[cfg(debug_assertions)]
             ShowHoaOnboardingFlow => false,
             #[cfg(target_family = "wasm")]

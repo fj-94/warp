@@ -669,6 +669,9 @@ fn ssh_command(target: &str) -> Command {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // On Windows, ensure that no console window is shown for ssh.exe.
+    #[cfg(windows)]
+    command.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW.0);
     command
 }
 

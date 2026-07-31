@@ -318,6 +318,7 @@ fn test_terminal_window_snapshot(vertical_tabs_panel_open: bool) -> WindowSnapsh
                     active_profile_id: None,
                     conversation_ids_to_restore: vec![],
                     active_conversation_id: None,
+                    remote_reconnect_command: Some("ssh production".to_string()),
                 }),
             }),
             default_directory_color: None,
@@ -372,6 +373,18 @@ fn test_sqlite_round_trips_vertical_tabs_panel_open() {
             .collect::<Vec<_>>(),
         vec![false, true]
     );
+    assert!(restored.windows.iter().all(|window| {
+        matches!(
+            &window.tabs[0].root,
+            PaneNodeSnapshot::Leaf(LeafSnapshot {
+                contents: LeafContents::Terminal(TerminalPaneSnapshot {
+                    remote_reconnect_command: Some(command),
+                    ..
+                }),
+                ..
+            }) if command == "ssh production"
+        )
+    }));
 }
 
 #[test]
@@ -401,6 +414,7 @@ fn test_sqlite_round_trips_custom_vertical_tabs_title() {
                         active_profile_id: None,
                         conversation_ids_to_restore: vec![],
                         active_conversation_id: None,
+                        remote_reconnect_command: None,
                     }),
                 }),
                 default_directory_color: None,

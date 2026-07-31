@@ -89,6 +89,7 @@ pub enum SftpViewAction {
 #[derive(Debug, Clone)]
 pub enum SftpViewEvent {
     Pane(PaneEvent),
+    ConnectRequested,
     #[cfg(feature = "local_fs")]
     OpenFile(PathBuf),
 }
@@ -225,6 +226,7 @@ pub struct SftpView {
     upload_button: ViewHandle<ActionButton>,
     download_button: ViewHandle<ActionButton>,
     cancel_all_button: ViewHandle<ActionButton>,
+    current_tab_target: Option<String>,
     connection: Option<SftpConnection>,
     target: String,
     remote_path: String,
@@ -401,6 +403,7 @@ impl SftpView {
             upload_button,
             download_button,
             cancel_all_button,
+            current_tab_target: None,
             connection: None,
             target: String::new(),
             remote_path: String::new(),
@@ -466,6 +469,18 @@ impl SftpView {
         self.connect(target, None, ctx);
     }
 
+    pub fn set_current_tab_target(&mut self, target: Option<String>) {
+        self.current_tab_target = target;
+    }
+
+    pub fn reconnect_to_target(&mut self, target: String, ctx: &mut ViewContext<Self>) {
+        self.current_tab_target = Some(target.clone());
+        self.target_editor.update(ctx, |editor, ctx| {
+            editor.set_buffer_text(&target, ctx);
+        });
+        self.connect(target, None, ctx);
+    }
+
     pub fn connect_to_target_if_empty(&mut self, target: String, ctx: &mut ViewContext<Self>) {
         let editor_is_empty = self
             .target_editor
@@ -503,7 +518,7 @@ impl SftpView {
         ctx: &mut ViewContext<Self>,
     ) {
         if matches!(event, EditorEvent::Enter) {
-            self.connect_from_editor(ctx);
+            ctx.emit(SftpViewEvent::ConnectRequested);
         }
     }
 
@@ -579,10 +594,18 @@ impl SftpView {
         );
     }
 
-    fn connect_from_editor(&mut self, ctx: &mut ViewContext<Self>) {
-        let target = self
+    pub(crate) fn connect_from_editor(&mut self, ctx: &mut ViewContext<Self>) {
+        let mut target = self
             .target_editor
             .read(ctx, |editor, ctx| editor.buffer_text(ctx).trim().to_owned());
+        if target.is_empty() {
+            if let Some(tab_target) = self.current_tab_target.clone() {
+                self.target_editor.update(ctx, |editor, ctx| {
+                    editor.set_buffer_text(&tab_target, ctx);
+                });
+                target = tab_target;
+            }
+        }
         self.connect(target, None, ctx);
     }
 
@@ -1948,7 +1971,7 @@ impl TypedActionView for SftpView {
 
     fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {
         match action {
-            SftpViewAction::Connect => self.connect_from_editor(ctx),
+            SftpViewAction::Connect => ctx.emit(SftpViewEvent::ConnectRequested),
             SftpViewAction::CancelConnect => self.cancel_connect(ctx),
             SftpViewAction::Refresh => self.load_directory(self.remote_path.clone(), ctx),
             SftpViewAction::NavigateUp => {

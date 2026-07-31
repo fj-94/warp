@@ -581,6 +581,7 @@ impl PaneContent for TerminalPane {
                 active_profile_id: None,
                 conversation_ids_to_restore: vec![],
                 active_conversation_id: None,
+                remote_reconnect_command: None,
             })
         } else if let Some(task_id) = view
             .ambient_agent_view_model()
@@ -611,6 +612,7 @@ impl PaneContent for TerminalPane {
                     active_profile_id: None,
                     conversation_ids_to_restore: vec![],
                     active_conversation_id: None,
+                    remote_reconnect_command: None,
                 })
             }
         } else {
@@ -641,17 +643,28 @@ impl PaneContent for TerminalPane {
                         .active_conversation_id()
                 });
 
+            // Both of these lock `view.model`, so they must be separate
+            // statements: a guard temporary inside the struct literal would
+            // live until the end of the whole expression and deadlock the
+            // second lock.
+            let is_read_only = view.model.lock().is_read_only();
+            #[cfg(feature = "sftp")]
+            let remote_reconnect_command = view.remote_reconnect_command_for_snapshot(app);
+            #[cfg(not(feature = "sftp"))]
+            let remote_reconnect_command = None;
+
             LeafContents::Terminal(TerminalPaneSnapshot {
                 uuid: self.uuid.clone(),
                 cwd: view.pwd_if_local(app),
                 is_active,
-                is_read_only: view.model.lock().is_read_only(),
+                is_read_only,
                 shell_launch_data: view.shell_launch_data_if_local(app),
                 input_config: Some(current_input_config),
                 llm_model_override,
                 active_profile_id,
                 conversation_ids_to_restore,
                 active_conversation_id,
+                remote_reconnect_command,
             })
         }
     }

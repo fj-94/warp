@@ -411,6 +411,7 @@ diesel::table! {
         active_profile_id -> Nullable<Text>,
         conversation_ids -> Nullable<Text>,
         active_conversation_id -> Nullable<Text>,
+        remote_reconnect_command -> Nullable<Text>,
     }
 }
 

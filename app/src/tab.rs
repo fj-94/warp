@@ -194,7 +194,7 @@ impl TabData {
         for section_items in [
             self.session_sharing_menu_items(index, ctx),
             self.copy_metadata_menu_items(pane_name_target, ctx),
-            self.sftp_menu_items(index),
+            self.sftp_menu_items(index, ctx),
             self.modify_tab_menu_items(index, tabs_len, pane_name_target, ctx),
             self.close_tab_menu_items(index, tabs_len, ctx),
             Self::save_config_menu_items(index),
@@ -211,16 +211,46 @@ impl TabData {
         menu_items
     }
 
-    fn sftp_menu_items(&self, index: usize) -> Vec<MenuItem<WorkspaceAction>> {
+    fn sftp_menu_items(&self, index: usize, ctx: &AppContext) -> Vec<MenuItem<WorkspaceAction>> {
         #[cfg(feature = "sftp")]
         {
-            vec![MenuItemFields::new("Open SFTP")
+            let terminal = self.pane_group.as_ref(ctx).active_session_view(ctx);
+            let can_reconnect = terminal
+                .as_ref()
+                .is_some_and(|terminal| terminal.as_ref(ctx).can_reconnect_remote_session(ctx));
+            let has_sftp_target = terminal.as_ref().is_some_and(|terminal| {
+                terminal
+                    .as_ref(ctx)
+                    .active_session_sftp_target(ctx)
+                    .is_some()
+            });
+            let mut items = vec![MenuItemFields::new("Open SFTP")
                 .with_on_select_action(WorkspaceAction::OpenSftpForTab(index))
-                .into_item()]
+                .into_item()];
+            if can_reconnect {
+                items.push(
+                    MenuItemFields::new("Reconnect Session")
+                        .with_on_select_action(WorkspaceAction::ReconnectRemoteTab(index))
+                        .into_item(),
+                );
+                items.push(
+                    MenuItemFields::new("Duplicate Tab")
+                        .with_on_select_action(WorkspaceAction::DuplicateRemoteTab(index))
+                        .into_item(),
+                );
+            }
+            if has_sftp_target {
+                items.push(
+                    MenuItemFields::new("Reconnect SFTP")
+                        .with_on_select_action(WorkspaceAction::ReconnectSftpForTab(index))
+                        .into_item(),
+                );
+            }
+            items
         }
         #[cfg(not(feature = "sftp"))]
         {
-            let _ = index;
+            let _ = (index, ctx);
             vec![]
         }
     }

@@ -2568,6 +2568,11 @@ pub struct TerminalView {
 
     bootstrap_start: Option<Instant>,
     is_login_shell_bootstrapped: bool,
+    /// Original SSH command of this tab's most recent remote session, either
+    /// restored from persistence or latched while the session was live. Used
+    /// to offer Reconnect after the tab falls back to a local or WSL shell.
+    #[cfg(feature = "sftp")]
+    remote_reconnect_command: Option<String>,
     /// Set when a pending command is submitted to the shell. Cleared on the
     /// next `AfterBlockCompleted`, at which point `Event::PendingCommandCompleted`
     /// is emitted so subscribers know the command has finished.
@@ -4225,6 +4230,8 @@ impl TerminalView {
             last_hover_fragment_boundary: None,
             bootstrap_start: None,
             is_login_shell_bootstrapped: false,
+            #[cfg(feature = "sftp")]
+            remote_reconnect_command: None,
             awaiting_pending_command_completion: false,
             pending_command_queue: Default::default(),
             enter_agent_view_after_pending_commands: false,
@@ -7116,27 +7123,142 @@ impl TerminalView {
         })
     }
 
-    /// Returns the destination parsed from the SSH command that created the
-    /// active remote subshell. Shell-reported hostname values are intentionally
-    /// not used here because custom prompts can contaminate that metadata.
     #[cfg(feature = "sftp")]
-    pub(crate) fn active_session_sftp_target<C: ModelAsRef>(&self, ctx: &C) -> Option<String> {
+    fn bootstrapped_active_ssh_context<C: ModelAsRef>(
+        &self,
+        ctx: &C,
+    ) -> Option<(String, InteractiveSshCommand)> {
+        let session = self
+            .active_block_session_id()
+            .and_then(|session_id| self.sessions.as_ref(ctx).get(session_id))?;
+        let subshell_info = session.subshell_info().as_ref()?;
+        let connection = subshell_info.ssh_connection_info.clone()?;
+        Some((subshell_info.spawning_command.clone(), connection))
+    }
+
+    #[cfg(feature = "sftp")]
+    fn running_ssh_context(&self) -> Option<(String, InteractiveSshCommand)> {
+        let command = self
+            .model
+            .lock()
+            .block_list()
+            .active_block()
+            .command_to_string();
+        let connection = parse_interactive_ssh_command(&command)?;
+        Some((command, connection))
+    }
+
+    #[cfg(feature = "sftp")]
+    fn detected_active_ssh_context<C: ModelAsRef>(
+        &self,
+        ctx: &C,
+    ) -> Option<(String, InteractiveSshCommand)> {
+        self.bootstrapped_active_ssh_context(ctx)
+            .or_else(|| self.running_ssh_context())
+    }
+
+    /// Reconstructs an SSH context from session metadata for remote sessions
+    /// (e.g. legacy SSH-wrapper sessions) whose original command was never
+    /// observed. The reconstruction loses any non-destination flags of the
+    /// original command, so it is only used as a last resort.
+    #[cfg(feature = "sftp")]
+    fn session_metadata_ssh_context<C: ModelAsRef>(
+        &self,
+        ctx: &C,
+    ) -> Option<(String, InteractiveSshCommand)> {
         let session = self
             .active_block_session_id()
             .and_then(|session_id| self.sessions.as_ref(ctx).get(session_id))?;
         if session.is_local() || session.is_wsl() {
             return None;
         }
-        let connection = session
-            .subshell_info()
-            .as_ref()
-            .and_then(|info| info.ssh_connection_info.as_ref())
-            .cloned()?;
+        let hostname = session.hostname();
+        if hostname.is_empty() {
+            return None;
+        }
+        let user = session.user();
+        let destination = if user.is_empty() {
+            hostname.to_string()
+        } else {
+            format!("{user}@{hostname}")
+        };
+        let connection = InteractiveSshCommand {
+            host: Some(destination.clone()),
+            port: None,
+        };
+        Some((format!("ssh {destination}"), connection))
+    }
+
+    #[cfg(feature = "sftp")]
+    fn reconnect_ssh_context<C: ModelAsRef>(
+        &self,
+        ctx: &C,
+    ) -> Option<(String, InteractiveSshCommand)> {
+        self.detected_active_ssh_context(ctx)
+            .or_else(|| {
+                let command = self.remote_reconnect_command.clone()?;
+                let connection = parse_interactive_ssh_command(&command)?;
+                Some((command, connection))
+            })
+            .or_else(|| self.session_metadata_ssh_context(ctx))
+    }
+
+    /// Returns the destination parsed from an original SSH command. Prompt
+    /// hostname values are intentionally excluded because they are not
+    /// necessarily reachable from the local machine.
+    #[cfg(feature = "sftp")]
+    pub(crate) fn active_session_sftp_target<C: ModelAsRef>(&self, ctx: &C) -> Option<String> {
+        let (_, connection) = self.reconnect_ssh_context(ctx)?;
         let host = connection.host?;
         Some(match connection.port {
             Some(port) => format!("{host}:{port}"),
             None => host,
         })
+    }
+
+    /// Returns the original SSH command for a running or restored remote tab.
+    #[cfg(feature = "sftp")]
+    pub(crate) fn active_session_ssh_command<C: ModelAsRef>(&self, ctx: &C) -> Option<String> {
+        self.reconnect_ssh_context(ctx).map(|(command, _)| command)
+    }
+
+    /// Returns true for a tab whose active session is remote, or whose local
+    /// (including WSL) session has a known SSH command from a running,
+    /// restored, or disconnected remote session.
+    #[cfg(feature = "sftp")]
+    pub(crate) fn can_reconnect_remote_session<C: ModelAsRef>(&self, ctx: &C) -> bool {
+        {
+            let model = self.model.lock();
+            if model.is_shared_session_viewer() || model.is_conversation_transcript_viewer() {
+                return false;
+            }
+        }
+        self.reconnect_ssh_context(ctx).is_some()
+    }
+
+    #[cfg(feature = "sftp")]
+    pub(crate) fn set_remote_reconnect_command(&mut self, command: Option<String>) {
+        self.remote_reconnect_command = command;
+    }
+
+    /// Remembers `command` as this tab's reconnect command if it is an
+    /// interactive SSH (or SSH-like) command. Called when a remote session
+    /// bootstraps and when a user block completes, so the command survives a
+    /// disconnect back to the local or WSL shell.
+    #[cfg(feature = "sftp")]
+    fn maybe_latch_remote_reconnect_command(&mut self, command: &str) {
+        if parse_interactive_ssh_command(command).is_some() {
+            self.remote_reconnect_command = Some(command.to_string());
+        }
+    }
+
+    #[cfg(feature = "sftp")]
+    pub(crate) fn remote_reconnect_command_for_snapshot<C: ModelAsRef>(
+        &self,
+        ctx: &C,
+    ) -> Option<String> {
+        self.active_session_ssh_command(ctx)
+            .or_else(|| self.remote_reconnect_command.clone())
     }
 
     /// Returns whether a specific session is local, treating shared-session
@@ -9009,19 +9131,6 @@ impl TerminalView {
             _ => {}
         }
         self.add_ssh_error_block(reason, ctx);
-    }
-
-    fn add_ssh_warpify_prompt(
-        &mut self,
-        command: &str,
-        ssh_host: Option<String>,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        self.clear_ssh_blocks(ctx);
-        self.handle_action(
-            &TerminalAction::ShowWarpifySshBanner(command.to_owned(), ssh_host),
-            ctx,
-        );
     }
 
     /// This method assumes the active block in the blocklist is a long-running SSH command.
@@ -11389,6 +11498,15 @@ impl TerminalView {
                 // because the abort is time sensitive.
                 self.warpify_state.abort_auto_warpify();
 
+                // A completed SSH command means its remote session just ended
+                // (disconnect or exit); remember the command so the tab can
+                // offer Reconnect from the local or WSL shell it fell back to.
+                #[cfg(feature = "sftp")]
+                if let BlockType::User(user_block_completed) = &block_type {
+                    let command = user_block_completed.command.clone();
+                    self.maybe_latch_remote_reconnect_command(&command);
+                }
+
                 let active_session = self
                     .active_block_session_id()
                     .and_then(|id| self.sessions.as_ref(ctx).get(id));
@@ -12886,6 +13004,16 @@ impl TerminalView {
         if let Some(subshell_info) = session.subshell_info() {
             self.warpify_state
                 .add_subshell_separator(subshell_info, self.model.clone(), ctx);
+        }
+
+        // The spawning command of a bootstrapped session is the original SSH
+        // command for both warpified subshells and legacy SSH-wrapper
+        // sessions; remember it for Reconnect after the connection drops.
+        // Non-SSH spawning commands are filtered out by the latch helper.
+        #[cfg(feature = "sftp")]
+        {
+            let spawning_command = bootstrap_event.spawning_command.clone();
+            self.maybe_latch_remote_reconnect_command(&spawning_command);
         }
 
         self.is_login_shell_bootstrapped = true;
@@ -24956,19 +25084,15 @@ impl TerminalView {
                     warpify_settings,
                 );
 
-                if let SshInteractiveSessionDetected::ShouldPromptWarpification {
-                    ref host,
-                    ref command,
-                } = ssh_interactive_session_event
+                if let SshInteractiveSessionDetected::ShouldPromptWarpification { .. } =
+                    ssh_interactive_session_event
                 {
-                    if FeatureFlag::WarpifyFooter.is_enabled() {
-                        self.show_warpify_footer(
-                            WarpificationMode::ssh(command.clone(), host.to_owned()),
-                            ctx,
-                        );
-                    } else {
-                        self.add_ssh_warpify_prompt(command, host.to_owned(), ctx)
-                    }
+                    // Warpify eligible SSH sessions automatically instead of
+                    // prompting. The enable_ssh_warpification and
+                    // use_ssh_tmux_wrapper settings plus the host denylist
+                    // remain the opt-outs, handled by
+                    // `evaluate_warpify_ssh_host` above.
+                    self.add_ssh_warpifying_block(ctx);
                 }
 
                 send_telemetry_from_ctx!(

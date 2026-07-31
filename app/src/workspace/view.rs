@@ -13272,6 +13272,57 @@ impl Workspace {
         self.open_left_panel_view(&LeftPanelAction::Sftp, ctx);
     }
 
+    #[cfg(feature = "sftp")]
+    fn reconnect_remote_tab(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+        let Some((terminal, ssh_command)) = self.tabs.get(index).and_then(|tab| {
+            let terminal = tab.pane_group.as_ref(ctx).active_session_view(ctx)?;
+            if !terminal.as_ref(ctx).can_reconnect_remote_session(ctx) {
+                return None;
+            }
+            let ssh_command = terminal.as_ref(ctx).active_session_ssh_command(ctx)?;
+            Some((terminal, ssh_command))
+        }) else {
+            return;
+        };
+
+        self.activate_tab(index, ctx);
+        terminal.update(ctx, |terminal, ctx| {
+            terminal.execute_command_or_set_pending(&ssh_command, ctx);
+        });
+    }
+
+    #[cfg(feature = "sftp")]
+    fn duplicate_remote_tab(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+        let Some(ssh_command) = self.tabs.get(index).and_then(|tab| {
+            tab.pane_group
+                .as_ref(ctx)
+                .active_session_view(ctx)
+                .and_then(|terminal| terminal.as_ref(ctx).active_session_ssh_command(ctx))
+        }) else {
+            return;
+        };
+
+        self.add_new_session_tab_internal_with_default_session_mode_behavior(
+            NewSessionSource::Tab,
+            Some(ctx.window_id()),
+            None,
+            None,
+            true,
+            DefaultSessionModeBehavior::Ignore,
+            ctx,
+        );
+        let Some(terminal) = self
+            .active_tab_pane_group()
+            .as_ref(ctx)
+            .active_session_view(ctx)
+        else {
+            return;
+        };
+        terminal.update(ctx, |terminal, ctx| {
+            terminal.execute_command_or_set_pending(&ssh_command, ctx);
+        });
+    }
+
     fn show_handoff_environment_creation_modal(&mut self, ctx: &mut ViewContext<Self>) {
         // Capture the initiating source view now, before async creation begins.
         // If we waited until the Created callback, the user may have switched panes.
@@ -21286,6 +21337,20 @@ impl TypedActionView for Workspace {
             #[cfg(feature = "sftp")]
             OpenSftpForTab(index) => {
                 self.open_sftp_for_tab(*index, ctx);
+            }
+            #[cfg(feature = "sftp")]
+            ReconnectSftpForTab(index) => {
+                self.open_sftp_for_tab(*index, ctx);
+                self.left_panel_view
+                    .update(ctx, |left_panel, ctx| left_panel.reconnect_active_sftp(ctx));
+            }
+            #[cfg(feature = "sftp")]
+            ReconnectRemoteTab(index) => {
+                self.reconnect_remote_tab(*index, ctx);
+            }
+            #[cfg(feature = "sftp")]
+            DuplicateRemoteTab(index) => {
+                self.duplicate_remote_tab(*index, ctx);
             }
             FixSettingsWithOz { error_description } => {
                 use crate::ai::skills::SkillManager;

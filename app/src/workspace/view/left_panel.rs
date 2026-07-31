@@ -497,17 +497,31 @@ impl LeftPanelView {
         }
 
         let sftp_view = ctx.add_typed_action_view(SftpView::new);
-        ctx.subscribe_to_view(&sftp_view, |_panel, _, event, ctx| match event {
-            SftpViewEvent::Pane(_) => {}
-            #[cfg(feature = "local_fs")]
-            SftpViewEvent::OpenFile(path) => {
-                ctx.emit(LeftPanelEvent::OpenFileWithTarget {
-                    location: LocalOrRemotePath::Local(path.clone()),
-                    target: FileTarget::CodeEditor(EditorLayout::SplitPane),
-                    line_col: None,
-                });
-            }
-        });
+        let sftp_pane_group = pane_group.clone();
+        ctx.subscribe_to_view(
+            &sftp_view,
+            move |_panel, sftp_view, event, ctx| match event {
+                SftpViewEvent::Pane(_) => {}
+                SftpViewEvent::ConnectRequested => {
+                    let target = sftp_pane_group
+                        .as_ref(ctx)
+                        .active_session_view(ctx)
+                        .and_then(|terminal| terminal.as_ref(ctx).active_session_sftp_target(ctx));
+                    sftp_view.update(ctx, |view, ctx| {
+                        view.set_current_tab_target(target);
+                        view.connect_from_editor(ctx);
+                    });
+                }
+                #[cfg(feature = "local_fs")]
+                SftpViewEvent::OpenFile(path) => {
+                    ctx.emit(LeftPanelEvent::OpenFileWithTarget {
+                        location: LocalOrRemotePath::Local(path.clone()),
+                        target: FileTarget::CodeEditor(EditorLayout::SplitPane),
+                        line_col: None,
+                    });
+                }
+            },
+        );
         self.working_directories_model.update(ctx, |model, _ctx| {
             model.store_sftp_view(pane_group_id, sftp_view.clone());
         });
@@ -532,15 +546,17 @@ impl LeftPanelView {
             return;
         }
 
-        let Some(target) = pane_group
+        let target = pane_group
             .as_ref(ctx)
             .active_session_view(ctx)
-            .and_then(|terminal| terminal.as_ref(ctx).active_session_sftp_target(ctx))
-        else {
-            return;
-        };
+            .and_then(|terminal| terminal.as_ref(ctx).active_session_sftp_target(ctx));
         let view = self.get_or_create_sftp_view_for_pane_group(pane_group, ctx);
-        view.update(ctx, |view, ctx| view.connect_to_target(target, ctx));
+        view.update(ctx, |view, ctx| {
+            view.set_current_tab_target(target.clone());
+            if let Some(target) = target {
+                view.connect_to_target(target, ctx);
+            }
+        });
     }
 
     #[cfg(feature = "sftp")]
@@ -553,6 +569,29 @@ impl LeftPanelView {
             return;
         };
         self.maybe_auto_connect_sftp_for_pane_group(&pane_group, ctx);
+    }
+
+    #[cfg(feature = "sftp")]
+    pub fn reconnect_active_sftp(&mut self, ctx: &mut ViewContext<Self>) {
+        let Some(pane_group) = self
+            .active_pane_group
+            .as_ref()
+            .and_then(|pane_group| pane_group.upgrade(ctx))
+        else {
+            return;
+        };
+        let target = pane_group
+            .as_ref(ctx)
+            .active_session_view(ctx)
+            .and_then(|terminal| terminal.as_ref(ctx).active_session_sftp_target(ctx));
+
+        let view = self.get_or_create_sftp_view_for_pane_group(&pane_group, ctx);
+        view.update(ctx, |view, ctx| {
+            view.set_current_tab_target(target.clone());
+            if let Some(target) = target {
+                view.reconnect_to_target(target, ctx);
+            }
+        });
     }
 
     #[cfg(feature = "sftp")]
@@ -711,7 +750,9 @@ impl LeftPanelView {
             ctx.subscribe_to_view(&pane_group, |panel, pane_group, event, ctx| {
                 if matches!(
                     event,
-                    PaneGroupEvent::ActiveSessionChanged | PaneGroupEvent::TerminalViewStateChanged
+                    PaneGroupEvent::ActiveSessionChanged
+                        | PaneGroupEvent::TerminalViewStateChanged
+                        | PaneGroupEvent::AppStateChanged
                 ) {
                     panel.maybe_auto_connect_sftp_for_pane_group(&pane_group, ctx);
                 }
