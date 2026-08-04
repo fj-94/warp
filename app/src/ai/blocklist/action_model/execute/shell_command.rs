@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -48,6 +49,13 @@ pub struct ShellCommandExecutor {
     /// pending poll future to resolve immediately with a fresh snapshot, bypassing the
     /// agent-set timeout.
     force_refresh_senders: HashMap<BlockSelector, oneshot::Sender<()>>,
+    /// Waiters for requested commands that are waiting for the currently running command to
+    /// finish before they can execute, keyed by the waiting action's ID. Woken from
+    /// `handle_terminal_model_event` once the active block is no longer running, so queued
+    /// agent commands resume automatically in order instead of being cancelled. Entries are
+    /// removed on cancellation (setting their `cancelled` flag) or when the action resolves,
+    /// so a cancelled command is never executed after the terminal frees up.
+    terminal_free_waiters: HashMap<AIAgentActionId, TerminalFreeWaiter>,
     terminal_model: Arc<FairMutex<TerminalModel>>,
     terminal_view_id: EntityId,
     /// Sender to notify when user hands control back to agent after TransferShellCommandControlToUser.
@@ -56,10 +64,15 @@ pub struct ShellCommandExecutor {
 
 impl ShellCommandExecutor {
     pub const MAX_WAIT_DURATION: Duration = Duration::from_secs(2);
-    /// Maximum delay we will honor for any agent-requested wait. Applies both  
-    /// to finite `ShellCommandDelay::Duration` requests and to  
-    /// `ShellCommandDelay::OnCompletion`, which would otherwise wait indefinitely.  
+    /// Maximum delay we will honor for any agent-requested wait. Applies both
+    /// to finite `ShellCommandDelay::Duration` requests and to
+    /// `ShellCommandDelay::OnCompletion`, which would otherwise wait indefinitely.
     pub const MAX_AGENT_DELAY_DURATION: Duration = Duration::from_secs(120);
+    /// Maximum time a queued requested command will wait for the currently running
+    /// command to finish before it gives up and reports itself as cancelled. This
+    /// bounds the wait so a command that never exits (e.g. a dev server) can't hold
+    /// the conversation's action batch open forever.
+    pub const MAX_ACTIVE_COMMAND_WAIT_DURATION: Duration = Duration::from_secs(600);
 
     pub fn new(
         active_session: ModelHandle<ActiveSession>,
@@ -75,6 +88,7 @@ impl ShellCommandExecutor {
             terminal_model,
             block_finished_senders: HashMap::new(),
             force_refresh_senders: HashMap::new(),
+            terminal_free_waiters: HashMap::new(),
             terminal_view_id,
             control_handback_sender: None,
         }
@@ -98,6 +112,24 @@ impl ShellCommandExecutor {
                     } else {
                         self.block_finished_senders
                             .insert(block_selector, block_finished_tx);
+                    }
+                }
+            }
+
+            // If the previously running command has finished, wake any requested commands
+            // that were queued behind it so they resume execution in order. Entries stay in
+            // the map (with `sender` consumed) until their action resolves, so cancellation
+            // can still reach the in-flight future.
+            if !self.terminal_free_waiters.is_empty()
+                && !model
+                    .block_list()
+                    .active_block()
+                    .is_active_and_long_running()
+            {
+                for waiter in self.terminal_free_waiters.values_mut() {
+                    if let Some(sender) = waiter.sender.take() {
+                        // The receiver may already be gone if the action was cancelled.
+                        let _ = sender.send(());
                     }
                 }
             }
@@ -232,16 +264,6 @@ impl ShellCommandExecutor {
                 wait_until_completion,
                 ..
             } => {
-                if model
-                    .block_list()
-                    .active_block()
-                    .is_active_and_long_running()
-                {
-                    // If there is an active block, we can't execute another command.
-                    return ActionExecution::Sync(AIAgentActionResultType::RequestCommandOutput(
-                        RequestCommandOutputResult::CancelledBeforeExecution,
-                    ));
-                }
                 // If the command might use pager and can't be interacted with,
                 // we pipe its output to cat so we can prevent activating the altscreen.
                 // The parentheses here ensures the command always gets evaluated first.
@@ -251,14 +273,111 @@ impl ShellCommandExecutor {
                     } else {
                         command.clone()
                     };
+
+                let terminal_is_busy = model
+                    .block_list()
+                    .active_block()
+                    .is_active_and_long_running();
+                let block_selector = BlockSelector::RequestedCommandId(action_id.clone());
+                let command = command.clone();
+                drop(model);
+
+                if terminal_is_busy {
+                    // Another command is still running in this terminal. Instead of
+                    // cancelling this command (which previously could end the whole
+                    // conversation), keep the action alive and wait for the active
+                    // command to finish, then execute automatically in order. The wait
+                    // is bounded so a command that never exits can't stall the agent
+                    // forever; on timeout the action resolves as cancelled and the
+                    // agent can re-issue the command later.
+                    log::info!(
+                        "Agent requested command while another command is still running; \
+                         queuing it to execute automatically once the terminal is free. \
+                         action_id={action_id}"
+                    );
+                    let (terminal_free_tx, terminal_free_rx) = oneshot::channel();
+                    let cancelled = Arc::new(AtomicBool::new(false));
+                    self.terminal_free_waiters.insert(
+                        action_id.clone(),
+                        TerminalFreeWaiter {
+                            sender: Some(terminal_free_tx),
+                            cancelled: cancelled.clone(),
+                        },
+                    );
+                    let spawner = ctx.spawner();
+                    let exec_action_id = action_id.clone();
+                    let exec_block_selector = block_selector.clone();
+
+                    let wait_then_execute = async move {
+                        let mut wait_timeout =
+                            Timer::after(Self::MAX_ACTIVE_COMMAND_WAIT_DURATION).fuse();
+                        pin!(terminal_free_rx);
+                        let terminal_freed = select! {
+                            val = terminal_free_rx => val.is_ok(),
+                            _ = wait_timeout => false,
+                        };
+                        if !terminal_freed {
+                            // Either the active command didn't finish within the wait
+                            // window, the action was cancelled, or the executor was torn
+                            // down. Report cancellation; the conversation continues and
+                            // the agent may retry later.
+                            return ActionResult::Cancelled;
+                        }
+
+                        // The terminal is free now: start the command and wait for its
+                        // result exactly like the non-busy path.
+                        match spawner
+                            .spawn(move |me: &mut ShellCommandExecutor, ctx| {
+                                // The action may have been cancelled between the wake-up
+                                // and this task running on the main thread. Never execute
+                                // a cancelled command.
+                                if cancelled.load(Ordering::SeqCst) {
+                                    return None;
+                                }
+                                // Re-check under the model lock: another command may have
+                                // started in the meantime (e.g. the user ran one manually).
+                                // If so, give up rather than typing into the running command.
+                                if me
+                                    .terminal_model
+                                    .lock()
+                                    .block_list()
+                                    .active_block()
+                                    .is_active_and_long_running()
+                                {
+                                    return None;
+                                }
+                                ctx.emit(ShellCommandExecutorEvent::ExecuteCommand {
+                                    action_id: exec_action_id,
+                                    command: decorated_command,
+                                });
+                                Some(me.action_result_future(exec_block_selector, None).boxed())
+                            })
+                            .await
+                        {
+                            Ok(Some(result_future)) => result_future.await,
+                            Ok(None) | Err(_) => ActionResult::Cancelled,
+                        }
+                    };
+
+                    let waiter_action_id = action_id.clone();
+                    return ActionExecution::new_async(wait_then_execute, move |result, ctx| {
+                        // Remove the senders from the maps.
+                        if let Some(handle) = handle.upgrade(ctx) {
+                            handle.update(ctx, |me, _| {
+                                me.terminal_free_waiters.remove(&waiter_action_id);
+                                me.block_finished_senders.remove(&block_selector);
+                                me.force_refresh_senders.remove(&block_selector);
+                            });
+                        }
+
+                        action_result_for_requested_command(command, result)
+                    });
+                }
+
                 ctx.emit(ShellCommandExecutorEvent::ExecuteCommand {
                     action_id: action_id.clone(),
                     command: decorated_command,
                 });
-
-                let block_selector = BlockSelector::RequestedCommandId(action_id.clone());
-                let command = command.clone();
-                drop(model);
 
                 ActionExecution::new_async(
                     self.action_result_future(block_selector.clone(), None),
@@ -623,6 +742,14 @@ impl ShellCommandExecutor {
     }
 
     pub(super) fn cancel_execution(&mut self, id: &AIAgentActionId, _ctx: &mut ModelContext<Self>) {
+        // If the action is still waiting for the terminal to free up, mark it cancelled and
+        // drop its waiter so the wait future resolves as cancelled and the command is never
+        // executed. The flag also covers the window between the waiter being woken and the
+        // execution task running on the main thread.
+        if let Some(waiter) = self.terminal_free_waiters.remove(id) {
+            waiter.cancelled.store(true, Ordering::SeqCst);
+        }
+
         let terminal_model = self.terminal_model.lock();
         let active_block = terminal_model.block_list().active_block();
         if !active_block.is_active_and_long_running() {
@@ -679,12 +806,23 @@ impl ShellCommandExecutor {
     }
 }
 
+/// Bookkeeping for a requested command action that is waiting for the currently
+/// running command to finish before it can execute.
+struct TerminalFreeWaiter {
+    /// Wakes the waiting future once the terminal is free. `None` after the waiter
+    /// has been woken (the entry is kept until the action resolves so cancellation
+    /// can still reach the in-flight future via `cancelled`).
+    sender: Option<oneshot::Sender<()>>,
+    /// Set when the action is cancelled; checked immediately before the queued
+    /// command would be executed so a cancelled command never runs.
+    cancelled: Arc<AtomicBool>,
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum BlockSelector {
     Id(BlockId),
     RequestedCommandId(AIAgentActionId),
 }
-
 impl BlockSelector {
     fn get_block<'a>(&self, model: &'a TerminalModel) -> Option<&'a Block> {
         match self {

@@ -27,7 +27,7 @@ use crate::ai::agent::conversation::{AIConversation, ConversationStatus};
 use crate::ai::agent::task::TaskId;
 use crate::ai::agent::{
     AIAgentActionResult, CancellationReason, PassiveSuggestionResultType, PassiveSuggestionTrigger,
-    PassiveSuggestionTriggerType, RunningCommand,
+    PassiveSuggestionTriggerType, RequestCommandOutputResult, RunningCommand,
 };
 use crate::ai::agent::{DocumentContentAttachmentSource, FileContext};
 use crate::ai::agent_events::AgentMessageEventMetadata;
@@ -471,11 +471,27 @@ impl BlocklistAIController {
 
             let is_lrc_command_completed =
                 cancellation_reason.is_some_and(|reason| reason.is_lrc_command_completed());
+            // Requested commands auto-cancelled without an explicit cancellation reason
+            // (e.g. the terminal stayed busy past the queued-command wait window) must
+            // still be reported back to the agent so the conversation continues and the
+            // agent can re-run them. Without this, an all-cancelled batch would silently
+            // end the conversation even though the user never asked to stop.
+            let is_auto_command_cancellation = cancellation_reason.is_none()
+                && !finished_action_results.is_empty()
+                && finished_action_results.iter().all(|result| {
+                    matches!(
+                        &result.result,
+                        AIAgentActionResultType::RequestCommandOutput(
+                            RequestCommandOutputResult::CancelledBeforeExecution
+                        )
+                    )
+                });
             let should_trigger_follow_up_request = (!is_passive_code_diff
                 && !is_lrc_command_completed
-                && finished_action_results
-                    .iter()
-                    .any(|result| result.result.should_trigger_request_upon_completion()))
+                && (is_auto_command_cancellation
+                    || finished_action_results
+                        .iter()
+                        .any(|result| result.result.should_trigger_request_upon_completion())))
                 || has_manual_follow_up;
             if !should_trigger_follow_up_request {
                 // We also check if there's an in-flight req, because it's possible that this

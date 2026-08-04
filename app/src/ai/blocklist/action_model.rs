@@ -227,6 +227,10 @@ fn can_start_action_with_current_phase(
 pub struct BlocklistAIActionModel {
     executor: ModelHandle<BlocklistAIActionExecutor>,
 
+    /// The terminal model backing this action model's terminal view. Used to upgrade stale
+    /// long-running command snapshots to completed results once the underlying block finishes.
+    terminal_model: Arc<FairMutex<TerminalModel>>,
+
     pending_preprocessed_actions: HashMap<AIConversationId, PendingPreprocessedActions>,
 
     /// Map from conversation ID to queue of pending [`AIAgentAction`]s.
@@ -269,7 +273,7 @@ impl BlocklistAIActionModel {
     ) -> Self {
         let executor = ctx.add_model(|ctx| {
             BlocklistAIActionExecutor::new(
-                terminal_model,
+                terminal_model.clone(),
                 active_session.clone(),
                 model_event_dispatcher,
                 get_relevant_files_controller,
@@ -313,6 +317,7 @@ impl BlocklistAIActionModel {
             pending_actions: Default::default(),
             finished_action_results: Default::default(),
             executor,
+            terminal_model,
             past_action_results: HashMap::new(),
             running_actions: Default::default(),
             action_order: Default::default(),
@@ -1116,34 +1121,6 @@ impl BlocklistAIActionModel {
         }
     }
 
-    /// Removes and returns all pending RequestCommandOutput actions for a conversation.
-    fn drain_pending_request_command_actions(
-        &mut self,
-        conversation_id: AIConversationId,
-    ) -> Vec<AIAgentAction> {
-        let Some(pending_actions) = self.pending_actions.get_mut(&conversation_id) else {
-            return Vec::new();
-        };
-
-        let mut to_drain = Vec::new();
-        let mut i = 0;
-        while i < pending_actions.len() {
-            if matches!(
-                pending_actions[i].action,
-                AIAgentActionType::RequestCommandOutput { .. }
-            ) {
-                to_drain.push(
-                    pending_actions
-                        .remove(i)
-                        .expect("index is valid because i < pending_actions.len()"),
-                );
-            } else {
-                i += 1;
-            }
-        }
-        to_drain
-    }
-
     fn cancel_pending_action(
         &mut self,
         conversation_id: AIConversationId,
@@ -1189,6 +1166,15 @@ impl BlocklistAIActionModel {
             .remove(&conversation_id)
             .unwrap_or_default();
 
+        // A long-running command snapshot is captured when the command's poll timeout
+        // fires. If later actions (e.g. queued commands) kept the batch open until the
+        // command actually finished, the snapshot is stale by the time results are sent
+        // back to the agent — upgrade it to a completed result with the real output.
+        let finished_action_results = finished_action_results
+            .into_iter()
+            .map(|result| self.upgrade_stale_snapshot_result(result))
+            .collect_vec();
+
         for result in finished_action_results.iter() {
             self.past_action_results
                 .insert(result.id.clone(), result.clone());
@@ -1197,6 +1183,45 @@ impl BlocklistAIActionModel {
             .into_iter()
             .map(|result| (*result).clone())
             .collect_vec()
+    }
+
+    /// If the given result is a long-running command snapshot whose block has since
+    /// finished, replace it with the completed command result so the agent sees the
+    /// final output instead of an early snapshot.
+    fn upgrade_stale_snapshot_result(
+        &self,
+        result: Arc<AIAgentActionResult>,
+    ) -> Arc<AIAgentActionResult> {
+        let AIAgentActionResultType::RequestCommandOutput(
+            RequestCommandOutputResult::LongRunningCommandSnapshot {
+                block_id, command, ..
+            },
+        ) = &result.result
+        else {
+            return result;
+        };
+
+        let terminal_model = self.terminal_model.lock();
+        let Some(block) = terminal_model.block_list().block_with_id(block_id) else {
+            return result;
+        };
+        if !block.finished() {
+            return result;
+        }
+
+        let completed = RequestCommandOutputResult::Completed {
+            block_id: block_id.clone(),
+            command: command.clone(),
+            output: block.output_with_secrets_unobfuscated(),
+            exit_code: block.exit_code(),
+            start_ts: block.start_ts().cloned(),
+            completed_ts: block.completed_ts().cloned(),
+        };
+        Arc::new(AIAgentActionResult {
+            id: result.id.clone(),
+            task_id: result.task_id.clone(),
+            result: AIAgentActionResultType::RequestCommandOutput(completed),
+        })
     }
 
     /// Clears finished action results for a conversation. Used when reverting.
@@ -1262,21 +1287,12 @@ impl BlocklistAIActionModel {
 
         let action_id = action_result.id.clone();
 
-        // If a command action entered long-running mode (returned a snapshot), cancel all other
-        // pending RequestCommandOutput actions. Only one command can be active at a time, and the
-        // server can only spawn one CLI subagent. We don't cancel other actions because those
-        // actions will complete before we send any response to the server. NOTE: this does allow
-        // the long-running command to execute in parallel with the other actions.
-        if matches!(
-            &action_result.result,
-            AIAgentActionResultType::RequestCommandOutput(
-                RequestCommandOutputResult::LongRunningCommandSnapshot { .. }
-            )
-        ) {
-            for action in self.drain_pending_request_command_actions(conversation_id) {
-                self.cancel_pending_action(conversation_id, action, cancellation_reason, ctx);
-            }
-        }
+        // NOTE: Previously, when a command action entered long-running mode (returned a
+        // snapshot), all other pending RequestCommandOutput actions were cancelled here.
+        // Now they stay queued: the ShellCommandExecutor keeps a queued command action
+        // alive while another command is running and executes it automatically, in order,
+        // once the terminal is free. This keeps the conversation going instead of
+        // cancelling the rest of the batch (and, previously, ending the conversation).
 
         self.finished_action_results
             .entry(conversation_id)
@@ -1308,14 +1324,36 @@ impl BlocklistAIActionModel {
         {
             if !cancellation_reason.is_some_and(|r| r.is_follow_up_for_same_conversation()) {
                 BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
-                    let status = if self
+                    let all_results_cancelled = self
                         .finished_action_results
                         .get(&conversation_id)
                         .is_some_and(|finished_results| {
                             finished_results
                                 .iter()
                                 .all(|result| result.result.is_cancelled())
-                        }) {
+                        });
+                    // Requested commands that were auto-cancelled without an explicit
+                    // cancellation reason (e.g. the terminal stayed busy past the queued
+                    // command wait window) must not end the conversation: their results
+                    // are still sent back to the agent so it can continue and re-run the
+                    // commands later. Only user/system-initiated cancellations mark the
+                    // conversation as cancelled.
+                    let is_auto_command_cancellation = cancellation_reason.is_none()
+                        && self
+                            .finished_action_results
+                            .get(&conversation_id)
+                            .is_some_and(|finished_results| {
+                                !finished_results.is_empty()
+                                    && finished_results.iter().all(|result| {
+                                        matches!(
+                                            &result.result,
+                                            AIAgentActionResultType::RequestCommandOutput(
+                                                RequestCommandOutputResult::CancelledBeforeExecution
+                                            )
+                                        )
+                                    })
+                            });
+                    let status = if all_results_cancelled && !is_auto_command_cancellation {
                         ConversationStatus::Cancelled
                     } else {
                         ConversationStatus::InProgress
